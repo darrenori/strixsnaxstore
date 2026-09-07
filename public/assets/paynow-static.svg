@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300" role="img"
+     aria-label="Placeholder for the store's PayNow QR code">
+  <rect width="300" height="300" fill="#ffffff"/>
+  <rect x="8" y="8" width="284" height="284" fill="none" stroke="#7B1E7A"
+        stroke-width="3" stroke-dasharray="10 8" rx="10"/>
+  <text x="150" y="120" text-anchor="middle" font-family="Arial, sans-serif"
+        font-size="26" font-weight="bold" fill="#7B1E7A">PAYNOW</text>
+  <text x="150" y="156" text-anchor="middle" font-family="Arial, sans-serif"
+        font-size="14" fill="#555">Drop your QR image here as</text>
+  <text x="150" y="176" text-anchor="middle" font-family="Arial, sans-serif"
+        font-size="13" font-weight="bold" fill="#333">public/assets/paynow-static.png</text>
+  <text x="150" y="206" text-anchor="middle" font-family="Arial, sans-serif"
+        font-size="12" fill="#777">…or set PAYNOW_PROXY_VALUE for</text>
+  <text x="150" y="224" text-anchor="middle" font-family="Arial, sans-serif"
+        font-size="12" fill="#777">per-order QR codes with the amount locked.</text>
+</svg>

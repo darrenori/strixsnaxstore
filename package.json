@@ -1,0 +1,37 @@
+{
+  "name": "strix-snax-store",
+  "version": "1.0.0",
+  "private": true,
+  "description": "STRIX Snax Store \u2014 Telegram bot + Mini App storefront with Supabase backend, PayNow payment verification and Google Sheets collation.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "seed": "node scripts/setup-db.js --seed-only",
+    "sheets:bootstrap": "node scripts/bootstrap-sheets.js",
+    "sheets:sync": "node scripts/sync-sheets.js",
+    "check": "node scripts/lint-syntax.js && npm test",
+    "db:setup": "node scripts/setup-db.js",
+    "test": "node --test tests/*.test.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1",
+    "express-rate-limit": "^7.4.1",
+    "googleapis": "^178.0.0",
+    "helmet": "^8.0.0",
+    "multer": "^2.3.0",
+    "pg": "^8.13.1",
+    "qrcode": "^1.5.4",
+    "telegraf": "^4.16.3",
+    "zod": "^3.23.8"
+  },
+  "overrides": {
+    "qs": "^6.16.0"
+  }
+}

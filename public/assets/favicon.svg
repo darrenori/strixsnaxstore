@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="12" fill="#fbf4d4"/>
+  <path d="M8 20h48v24a6 6 0 0 1-6 6H14a6 6 0 0 1-6-6z" fill="#e03c31"/>
+  <path d="M8 20 16 8h32l8 12z" fill="#f2b441"/>
+  <text x="32" y="41" font-family="Arial Black, sans-serif" font-size="15"
+        font-weight="900" fill="#fbf4d4" text-anchor="middle">SNAX</text>
+</svg>

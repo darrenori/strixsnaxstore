@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+  <meta name="color-scheme" content="light dark" />
+  <title>STRIX Snax Store</title>
+  <meta name="description" content="STRIX Snax Store — snacks at Blk B Lounge, drinks at Blk B Pantry. Open 24/7." />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Bungee&family=Pacifico&family=Bitter:wght@500;600;700;800&family=Nunito+Sans:opsz,wght@6..12,400;6..12,600;6..12,700;6..12,800&display=swap"
+    rel="stylesheet" />
+
+  <link rel="stylesheet" href="/css/tokens.css" />
+  <link rel="stylesheet" href="/css/app.css" />
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+  <!-- Boot splash: the poster badge, so the very first frame is on-brand. -->
+  <div id="splash" class="splash">
+    <div class="badge badge--lg" aria-hidden="true">
+      <span class="badge__ay">AY2026/2027</span>
+      <span class="badge__word">STRIX</span>
+      <span class="badge__script">Snax Store</span>
+    </div>
+    <p class="splash__msg">Opening the store…</p>
+  </div>
+
+  <div id="app" class="app" hidden>
+    <header class="topbar">
+      <div class="topbar__checker" aria-hidden="true"></div>
+      <div class="topbar__inner">
+        <button class="topbar__back" id="backBtn" type="button" hidden aria-label="Go back">‹</button>
+        <div class="topbar__title">
+          <span class="topbar__word">STRIX</span>
+          <span class="topbar__script">Snax Store</span>
+        </div>
+        <button class="topbar__cart" id="cartBtn" type="button" aria-label="Open cart">
+          🛒<span class="topbar__count" id="cartCount" hidden>0</span>
+        </button>
+      </div>
+    </header>
+
+    <main id="view" class="view" tabindex="-1"></main>
+
+    <nav class="tabbar" id="tabbar" aria-label="Main">
+      <button class="tab is-active" data-tab="shop" type="button">
+        <span class="tab__icon">🐼</span><span class="tab__label">Shop</span>
+      </button>
+      <button class="tab" data-tab="orders" type="button">
+        <span class="tab__icon">🧾</span><span class="tab__label">Orders</span>
+      </button>
+      <button class="tab" data-tab="admin" type="button" hidden>
+        <span class="tab__icon">🛠</span><span class="tab__label">Admin</span>
+        <span class="tab__badge" id="adminBadge" hidden></span>
+      </button>
+    </nav>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>
