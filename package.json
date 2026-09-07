@@ -9,6 +9,7 @@
   },
   "main": "src/index.js",
   "scripts": {
+    "setup": "node scripts/setup.js",
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "seed": "node scripts/setup-db.js --seed-only",

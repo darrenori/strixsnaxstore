@@ -91,10 +91,14 @@ The app talks plain SQL through `pg`, with no vendor SDK, so moving between
 providers is only ever a change of `DATABASE_URL`.
 
 ```bash
-cp .env.example .env      # fill in DATABASE_URL
 npm install
-npm run db:setup          # applies db/schema.sql then db/seed.sql
+npm run setup             # asks for the two values only you know, then builds the database
 ```
+
+`npm run setup` writes `.env`, generating the secrets itself, and applies
+`db/schema.sql` and `db/seed.sql`. It works the same on PowerShell, CMD, zsh
+and bash, and takes piped answers for a scripted install. To redo just the
+database later: `npm run db:setup`.
 
 The seed is the menu straight off the two posters: Hello Panda, Roller
 Coasters, Fish Crackers, the noodle wall, Lotte Pepero, the Under $1 deals,
