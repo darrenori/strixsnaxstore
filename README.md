@@ -83,7 +83,10 @@ Express API  ──────────────►  Postgres
 
 ### 1. A Postgres database
 
-Any Postgres 14+ works — Neon, Supabase, Render, Fly, or one on your laptop.
+Any Postgres 14+ works — Supabase, Neon, Fly, or one on your laptop. On a
+serverless host, use the provider's **pooled** connection string (Supabase's
+port 6543, Neon's `-pooler` host): every function invocation opens its own
+connection, and a direct URL will exhaust the server's connection limit.
 The app talks plain SQL through `pg`, with no vendor SDK, so moving between
 providers is only ever a change of `DATABASE_URL`.
 
@@ -156,15 +159,31 @@ npm start
 
 ## Deploying
 
-`render.yaml` and a `Dockerfile` are both here.
+The app runs two ways from the same source.
 
-On Render: **New → Blueprint**, point it at this repo, then fill in the
-`sync: false` variables. Set `PUBLIC_URL` to the https URL Render assigns.
+**As a long-running server** (Railway, Fly, a VPS, `npm start`): the bot uses
+long polling and a timer sweeps expired holds. Nothing else to configure.
 
-Avoid free tiers that sleep — the bot uses long polling and stops receiving
-messages while the instance is asleep. If you must, switch to a webhook
-(`TELEGRAM_USE_WEBHOOK=true` plus `TELEGRAM_WEBHOOK_URL` and
-`TELEGRAM_WEBHOOK_SECRET`).
+**As serverless functions** (Vercel): `vercel.json` and `api/index.js` are
+here. There is no boot phase, so the bot switches to a webhook and the sweep
+happens two other ways — a daily Vercel cron hits `/api/cron/janitor`, and
+`create_order` releases expired holds itself before it counts stock, which
+means the shelf is correct at the moment of purchase even if no cron ever runs.
+
+Set these for the serverless path:
+
+```env
+TELEGRAM_USE_WEBHOOK=true
+TELEGRAM_WEBHOOK_URL=https://<your-app>.vercel.app/telegram/webhook
+TELEGRAM_WEBHOOK_SECRET=<a long random string>
+CRON_SECRET=<another long random string>
+```
+
+**Avoid free tiers that sleep.** A sleeping instance stops long polling, and
+the store advertises itself as open 24/7. Serverless does not have this
+problem, which is why the Vercel path exists.
+
+A `Dockerfile` is also here for anywhere that takes a container.
 
 ---
 

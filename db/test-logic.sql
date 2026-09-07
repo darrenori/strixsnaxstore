@@ -201,6 +201,29 @@ begin
   end;
   v_ok := v_ok + 1;
 
+  -- --- 15. a new order releases someone else's expired hold ---------------
+  -- This is what lets the app run on a host with no background process: the
+  -- shelf self-corrects at the moment of purchase, not on a timer.
+  update items set stock = 1, reserved = 0 where id = v_coke;
+  delete from orders;
+
+  select * into v_order from create_order(v_buyer, 900001, 'Squatter', null,
+    jsonb_build_array(jsonb_build_object('item_id', v_coke, 'quantity', 1)));
+  update orders set expires_at = now() - interval '1 hour' where id = v_order.id;
+
+  select stock - reserved into v_avail from items where id = v_coke;
+  if v_avail <> 0 then
+    raise exception 'FAIL 15: the last unit should be held (avail %)', v_avail;
+  end if;
+
+  -- A different shopper walks up. Without self-healing this raises OUT_OF_STOCK.
+  select * into v_order from create_order(v_other, 900002, 'Buyer', null,
+    jsonb_build_array(jsonb_build_object('item_id', v_coke, 'quantity', 1)));
+  if v_order.total_cents <> 100 then
+    raise exception 'FAIL 15: expected the freed unit to sell for 100, got %', v_order.total_cents;
+  end if;
+  v_ok := v_ok + 1;
+
   raise notice '';
   raise notice '  ✅ all % business-logic assertions passed', v_ok;
   raise notice '';

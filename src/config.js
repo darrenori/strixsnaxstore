@@ -45,6 +45,9 @@ export const config = {
   /** Public https origin the Mini App is served from — Telegram requires https. */
   publicUrl: optional('PUBLIC_URL', '').replace(/\/$/, ''),
 
+  /** Shared secret for the scheduled-maintenance endpoint. */
+  cronSecret: optional('CRON_SECRET'),
+
   telegram: {
     botToken: required('TELEGRAM_BOT_TOKEN'),
     // Long polling by default; set a webhook URL in production if you prefer.

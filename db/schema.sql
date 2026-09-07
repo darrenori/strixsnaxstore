@@ -186,6 +186,11 @@ create trigger items_touch  before update on items  for each row execute functio
 drop trigger if exists orders_touch on orders;
 create trigger orders_touch before update on orders for each row execute function touch_updated_at();
 
+-- Forward declaration: create_order calls this, and this calls release_order,
+-- so one of them has to be stubbed first. Replaced with the real body below.
+create or replace function expire_stale_orders() returns int
+language plpgsql as $$ begin return 0; end $$;
+
 -- ============================================================================
 -- create_order — the only way an order may be born.
 -- Prices and stock are read from the table under a row lock, so a client can
@@ -226,6 +231,12 @@ begin
   if coalesce((select value::text from settings where key = 'store_open'), 'true') = 'false' then
     raise exception 'STORE_CLOSED' using errcode = 'P0001';
   end if;
+
+  -- Release abandoned checkouts before counting stock. A long-running host
+  -- also sweeps on a timer, but doing it here means the shelf is correct at
+  -- the only moment it matters — someone trying to buy — even on a serverless
+  -- host with no background process at all.
+  perform expire_stale_orders();
 
   -- Cap concurrent unpaid orders so nobody can pin the whole shelf as "reserved".
   select count(*) into v_count

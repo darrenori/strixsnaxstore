@@ -50,6 +50,17 @@ app.use(helmet({
   frameguard: false,
 }));
 
+/**
+ * Some serverless runtimes (Vercel's included) read and parse the request body
+ * before the handler runs, leaving an already-consumed stream. express.json()
+ * would then wait forever on a body that has gone. Marking `_body` tells the
+ * body parsers the work is already done, which is exactly the flag they check.
+ */
+app.use((req, _res, next) => {
+  if (req.body !== undefined && req.body !== null) req._body = true;
+  next();
+});
+
 app.use(express.json({ limit: '256kb' }));
 app.use(express.urlencoded({ extended: false, limit: '256kb' }));
 
@@ -78,20 +89,50 @@ app.get('/healthz', async (req, res) => {
 // ---------------------------------------------------------------------------
 // Telegram webhook (only when TELEGRAM_USE_WEBHOOK=true)
 // ---------------------------------------------------------------------------
-if (config.telegram.useWebhook && config.telegram.webhookUrl) {
-  const webhookPath = new URL(config.telegram.webhookUrl).pathname;
-  app.post(webhookPath, (req, res) => {
-    // Telegram echoes the secret we registered; anything else is not Telegram.
-    if (config.telegram.webhookSecret &&
-        req.get('X-Telegram-Bot-Api-Secret-Token') !== config.telegram.webhookSecret) {
-      return res.sendStatus(401);
-    }
-    const bot = getBot();
-    if (!bot) return res.sendStatus(503);
-    bot.handleUpdate(req.body).catch((err) => log.error('Webhook update failed', { error: err.message }));
-    return res.sendStatus(200);
-  });
-}
+/**
+ * Telegram webhook. Always mounted at a fixed path so a serverless deployment
+ * has somewhere to receive updates without a boot step; long-polling hosts
+ * simply never have it called.
+ */
+app.post('/telegram/webhook', async (req, res) => {
+  // Telegram echoes the secret we registered with setWebhook; anything else
+  // is not Telegram, and this endpoint is necessarily public.
+  if (config.telegram.webhookSecret &&
+      req.get('X-Telegram-Bot-Api-Secret-Token') !== config.telegram.webhookSecret) {
+    log.warn('Webhook called with a bad secret', { ip: req.ip });
+    return res.sendStatus(401);
+  }
+
+  // Answer Telegram first: it retries on anything slow, which would duplicate
+  // work. The update is then handled on the same invocation.
+  res.sendStatus(200);
+  try {
+    await getBot().handleUpdate(req.body);
+  } catch (err) {
+    log.error('Webhook update failed', { error: err.message });
+  }
+  return undefined;
+});
+
+/**
+ * Scheduled maintenance, for hosts with no long-lived process to run a timer.
+ * Guarded by a shared secret because it is a public URL that does real work.
+ */
+app.all('/api/cron/janitor', async (req, res) => {
+  const secret = config.cronSecret;
+  const presented = req.get('Authorization')?.replace(/^Bearer\s+/i, '')
+    ?? req.query.key;
+  if (!secret || presented !== secret) return res.sendStatus(401);
+
+  try {
+    const expired = await expireStaleOrders();
+    const pruned = req.query.prune === '1' ? await pruneOldProofs() : 0;
+    return res.json({ ok: true, expired, pruned });
+  } catch (err) {
+    log.error('Cron janitor failed', { error: err.message });
+    return res.status(500).json({ ok: false });
+  }
+});
 
 // ---------------------------------------------------------------------------
 // API — everything past this point needs a valid Telegram signature.

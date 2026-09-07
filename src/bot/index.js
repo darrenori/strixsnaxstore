@@ -8,7 +8,16 @@ import { esc } from './notify.js';
 
 let bot = null;
 
+/**
+ * The bot instance, constructed on first use.
+ *
+ * On a long-running host `launchBot()` builds it at boot. On a serverless host
+ * there is no boot: each cold start begins with an incoming webhook or an API
+ * call that wants to send a notification, so the instance has to be able to
+ * appear on demand. `createBot()` is idempotent, which makes both paths safe.
+ */
 export function getBot() {
+  if (!bot) createBot();
   return bot;
 }
 
