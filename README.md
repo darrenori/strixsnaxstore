@@ -223,6 +223,10 @@ tests/                   node:test — auth, PayNow, HTTP
 There is no bundler on purpose. The Mini App is plain ES modules, so what runs
 in Telegram is exactly what is in the repo.
 
+The Google client is `@googleapis/sheets` and `@googleapis/drive` rather than
+the umbrella `googleapis` package, which bundles every Google API and costs
+209 MB for the two we actually use. Production `node_modules` is 47 MB.
+
 ## Tests
 
 ```bash

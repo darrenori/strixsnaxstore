@@ -1,4 +1,4 @@
-import { google } from 'googleapis';
+import { sheets as sheetsApi, auth as googleAuth } from '@googleapis/sheets';
 import config from '../config.js';
 import log from './logger.js';
 
@@ -67,13 +67,13 @@ async function client() {
   if (sheetsClient) return sheetsClient;
   if (!credentialsPresent()) return null;
 
-  const auth = new google.auth.JWT({
+  const auth = new googleAuth.JWT({
     email: config.sheets.serviceAccountEmail,
     key: config.sheets.privateKey,
     scopes: SCOPES,
   });
   await auth.authorize();
-  sheetsClient = google.sheets({ version: 'v4', auth });
+  sheetsClient = sheetsApi({ version: 'v4', auth });
   return sheetsClient;
 }
 

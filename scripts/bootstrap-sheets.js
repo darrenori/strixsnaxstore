@@ -9,7 +9,8 @@
  * GOOGLE_SHEETS_ID and restart the server.
  */
 import 'dotenv/config';
-import { google } from 'googleapis';
+import { sheets as sheetsApi, auth as googleAuth } from '@googleapis/sheets';
+import { drive as driveApi } from '@googleapis/drive';
 import { TABS } from '../src/lib/sheets.js';
 
 const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
@@ -21,7 +22,7 @@ if (!email || !key) {
   process.exit(1);
 }
 
-const auth = new google.auth.JWT({
+const auth = new googleAuth.JWT({
   email,
   key,
   scopes: [
@@ -32,8 +33,8 @@ const auth = new google.auth.JWT({
 
 try {
   await auth.authorize();
-  const sheets = google.sheets({ version: 'v4', auth });
-  const drive = google.drive({ version: 'v3', auth });
+  const sheets = sheetsApi({ version: 'v4', auth });
+  const drive = driveApi({ version: 'v3', auth });
 
   const tabs = Object.values(TABS);
 
