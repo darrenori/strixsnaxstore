@@ -5,8 +5,8 @@ import crypto from 'node:crypto';
 const BOT_TOKEN = '8900764054:TEST-TOKEN-FOR-UNIT-TESTS-ONLY';
 
 process.env.TELEGRAM_BOT_TOKEN = BOT_TOKEN;
-process.env.SUPABASE_URL ??= 'https://test.supabase.co';
-process.env.SUPABASE_SERVICE_ROLE_KEY ??= 'test-key';
+process.env.DATABASE_URL ??= 'postgres://test:test@127.0.0.1:1/testdb';
+
 
 const { verifyInitData, InitDataError } = await import('../src/lib/telegram-auth.js');
 

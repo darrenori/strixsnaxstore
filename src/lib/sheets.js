@@ -5,7 +5,7 @@ import log from './logger.js';
 /**
  * Google Sheets collation.
  *
- * Supabase is the system of record; the spreadsheet is the human-readable
+ * Postgres is the system of record; the spreadsheet is the human-readable
  * ledger the committee actually opens. Every write here is best-effort: if
  * Google is down or the credentials lapse, orders must still go through, so
  * failures are logged and swallowed rather than thrown at the buyer.

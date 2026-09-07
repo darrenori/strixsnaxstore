@@ -1,7 +1,6 @@
-import { supabase, unwrap, parseRpcError } from '../lib/supabase.js';
+import { query, one, rpc, transaction, parseDbError } from '../lib/db.js';
 import { createPaymentQr } from '../lib/paynow.js';
 import * as sheets from '../lib/sheets.js';
-import config from '../config.js';
 import log from '../lib/logger.js';
 
 export class OrderError extends Error {
@@ -13,9 +12,9 @@ export class OrderError extends Error {
   }
 }
 
-const ORDER_FIELDS = `
+const ORDER_COLUMNS = `
   id, code, user_id, telegram_id, buyer_name, status, subtotal_cents, total_cents,
-  collection_points, note, payment_proof_path, payment_ref, reviewed_by, reviewed_at,
+  collection_points, note, payment_proof_id, payment_ref, reviewed_by, reviewed_at,
   review_note, sheet_synced_at, expires_at, created_at, updated_at
 `;
 
@@ -31,7 +30,7 @@ function toPublicOrder(order, items = []) {
     collectionPoints: order.collection_points ?? [],
     note: order.note ?? null,
     paymentRef: order.payment_ref ?? null,
-    hasProof: Boolean(order.payment_proof_path),
+    hasProof: Boolean(order.payment_proof_id),
     reviewNote: order.review_note ?? null,
     reviewedAt: order.reviewed_at ?? null,
     expiresAt: order.expires_at,
@@ -48,12 +47,8 @@ function toPublicOrder(order, items = []) {
   };
 }
 
-async function loadItems(orderId) {
-  return unwrap(
-    await supabase.from('order_items').select('*').eq('order_id', orderId).order('created_at'),
-    'load order items'
-  );
-}
+const loadItems = (orderId) =>
+  query('select * from order_items where order_id = $1 order by created_at', [orderId]);
 
 /**
  * Place an order. The client sends item ids and quantities only — never a
@@ -64,26 +59,21 @@ async function loadItems(orderId) {
 export async function placeOrder({ user, buyerName, note, cart }) {
   const payload = cart.map((line) => ({ item_id: line.itemId, quantity: line.quantity }));
 
-  const { data, error } = await supabase.rpc('create_order', {
-    p_user_id: user.id,
-    p_telegram_id: user.telegram_id,
-    p_buyer_name: buyerName,
-    p_note: note ?? null,
-    p_items: payload,
-  });
-
-  if (error) {
-    const friendly = parseRpcError(error);
+  let order;
+  try {
+    order = await rpc('create_order', [
+      user.id, user.telegram_id, buyerName, note ?? null, JSON.stringify(payload),
+    ]);
+  } catch (err) {
+    const friendly = parseDbError(err);
     if (friendly) throw new OrderError(friendly.message, friendly.code, 409);
-    log.error('create_order failed', { error: error.message, userId: user.id });
+    log.error('create_order failed', { error: err.message, userId: user.id });
     throw new OrderError('Could not place that order. Please try again.', 'ORDER_FAILED', 500);
   }
 
-  const order = Array.isArray(data) ? data[0] : data;
-
   // Remember the name so the next checkout is one tap shorter.
   if (buyerName && buyerName !== user.display_name) {
-    await supabase.from('app_users').update({ display_name: buyerName }).eq('id', user.id);
+    await query('update app_users set display_name = $1 where id = $2', [buyerName, user.id]);
   }
 
   const items = await loadItems(order.id);
@@ -98,9 +88,9 @@ export async function placeOrder({ user, buyerName, note, cart }) {
 }
 
 export async function getOrder(orderId, { userId = null } = {}) {
-  let query = supabase.from('orders').select(ORDER_FIELDS).eq('id', orderId);
-  if (userId) query = query.eq('user_id', userId);
-  const order = unwrap(await query.maybeSingle(), 'load order');
+  const order = userId
+    ? await one(`select ${ORDER_COLUMNS} from orders where id = $1 and user_id = $2`, [orderId, userId])
+    : await one(`select ${ORDER_COLUMNS} from orders where id = $1`, [orderId]);
   if (!order) throw new OrderError('Order not found.', 'ORDER_NOT_FOUND', 404);
   return toPublicOrder(order, await loadItems(order.id));
 }
@@ -117,69 +107,95 @@ export async function getOrderWithPayment(orderId, { userId = null } = {}) {
 }
 
 export async function listUserOrders(userId, { limit = 25 } = {}) {
-  const orders = unwrap(
-    await supabase.from('orders').select(ORDER_FIELDS)
-      .eq('user_id', userId).order('created_at', { ascending: false }).limit(limit),
-    'list orders'
+  const orders = await query(
+    `select ${ORDER_COLUMNS} from orders where user_id = $1
+     order by created_at desc limit $2`,
+    [userId, limit]
   );
   if (orders.length === 0) return [];
 
-  const items = unwrap(
-    await supabase.from('order_items').select('*').in('order_id', orders.map((o) => o.id)),
-    'list order items'
+  const items = await query(
+    'select * from order_items where order_id = any($1::uuid[])',
+    [orders.map((o) => o.id)]
   );
   return orders.map((o) => toPublicOrder(o, items.filter((i) => i.order_id === o.id)));
 }
 
 /**
- * Attach the uploaded PayNow screenshot and move the order into the review
+ * Store the uploaded PayNow screenshot and move the order into the review
  * queue. Only the order's own owner may do this, and only while it is still
  * waiting — an approved order can never be re-opened by the buyer.
+ *
+ * The insert and the status change go in one transaction so an order can
+ * never end up flagged as having a proof that was not actually stored.
  */
-export async function attachPaymentProof({ orderId, user, storagePath, paymentRef }) {
-  const order = unwrap(
-    await supabase.from('orders').select(ORDER_FIELDS).eq('id', orderId).eq('user_id', user.id).maybeSingle(),
-    'load order for proof'
+export async function attachPaymentProof({ orderId, user, bytes, mimeType, paymentRef }) {
+  const order = await one(
+    `select ${ORDER_COLUMNS} from orders where id = $1 and user_id = $2`,
+    [orderId, user.id]
   );
   if (!order) throw new OrderError('Order not found.', 'ORDER_NOT_FOUND', 404);
   if (!['awaiting_payment', 'pending_review', 'rejected'].includes(order.status)) {
     throw new OrderError('That order is not waiting for payment.', 'ORDER_NOT_PAYABLE', 409);
   }
 
-  const updated = unwrap(
-    await supabase.from('orders').update({
-      payment_proof_path: storagePath,
-      payment_ref: paymentRef ?? order.code,
-      status: 'pending_review',
-      review_note: null,
-    }).eq('id', order.id).select(ORDER_FIELDS).single(),
-    'attach proof'
-  );
+  const updated = await transaction(async (client) => {
+    const { rows: [proof] } = await client.query(
+      `insert into payment_proofs(order_id, mime_type, byte_size, bytes, uploaded_by)
+       values ($1, $2, $3, $4, $5) returning id`,
+      [order.id, mimeType, bytes.length, bytes, user.id]
+    );
 
-  log.info('Payment proof attached', { code: updated.code });
+    // Replacing a rejected order's proof: drop the previous image.
+    if (order.payment_proof_id) {
+      await client.query('delete from payment_proofs where id = $1', [order.payment_proof_id]);
+    }
+
+    const { rows: [row] } = await client.query(
+      `update orders
+          set payment_proof_id = $1, payment_ref = $2,
+              status = 'pending_review', review_note = null
+        where id = $3
+        returning ${ORDER_COLUMNS}`,
+      [proof.id, paymentRef ?? order.code, order.id]
+    );
+    return row;
+  });
+
+  log.info('Payment proof attached', { code: updated.code, bytes: bytes.length });
   return toPublicOrder(updated, await loadItems(updated.id));
+}
+
+/** Stream one screenshot back to an admin. Returns null when there is none. */
+export async function getProof(orderId) {
+  return one(
+    `select p.bytes, p.mime_type, p.byte_size
+       from payment_proofs p
+       join orders o on o.payment_proof_id = p.id
+      where o.id = $1`,
+    [orderId]
+  );
 }
 
 /** Buyer-initiated cancel, only while nothing has been reviewed yet. */
 export async function cancelOrder({ orderId, user }) {
-  const order = unwrap(
-    await supabase.from('orders').select('id, status').eq('id', orderId).eq('user_id', user.id).maybeSingle(),
-    'load order for cancel'
+  const order = await one(
+    'select id, status from orders where id = $1 and user_id = $2',
+    [orderId, user.id]
   );
   if (!order) throw new OrderError('Order not found.', 'ORDER_NOT_FOUND', 404);
   if (!['awaiting_payment', 'pending_review'].includes(order.status)) {
     throw new OrderError('That order can no longer be cancelled.', 'ORDER_NOT_CANCELLABLE', 409);
   }
 
-  const { error } = await supabase.rpc('release_order', {
-    p_order_id: orderId,
-    p_admin_id: user.id,
-    p_status: 'cancelled',
-    p_note: 'Cancelled by buyer',
-  });
-  if (error) {
-    const friendly = parseRpcError(error);
-    throw new OrderError(friendly?.message ?? 'Could not cancel that order.', friendly?.code ?? 'CANCEL_FAILED', 409);
+  try {
+    await rpc('release_order', [orderId, user.id, 'cancelled', 'Cancelled by buyer']);
+  } catch (err) {
+    const friendly = parseDbError(err);
+    throw new OrderError(
+      friendly?.message ?? 'Could not cancel that order.',
+      friendly?.code ?? 'CANCEL_FAILED', 409
+    );
   }
   return getOrder(orderId, { userId: user.id });
 }
@@ -189,171 +205,161 @@ export async function cancelOrder({ orderId, user }) {
 // ---------------------------------------------------------------------------
 
 export async function listOrders({ status = null, limit = 60 } = {}) {
-  let query = supabase.from('orders').select(ORDER_FIELDS)
-    .order('created_at', { ascending: false }).limit(limit);
-  if (status) query = query.eq('status', status);
+  const orders = status
+    ? await query(
+        `select ${ORDER_COLUMNS} from orders where status = $1
+         order by created_at desc limit $2`, [status, limit])
+    : await query(
+        `select ${ORDER_COLUMNS} from orders order by created_at desc limit $1`, [limit]);
 
-  const orders = unwrap(await query, 'admin list orders');
   if (orders.length === 0) return [];
 
+  const ids = orders.map((o) => o.id);
   const [items, users] = await Promise.all([
-    supabase.from('order_items').select('*').in('order_id', orders.map((o) => o.id)),
-    supabase.from('app_users').select('id, telegram_id, username, first_name, last_name')
-      .in('id', [...new Set(orders.map((o) => o.user_id))]),
+    query('select * from order_items where order_id = any($1::uuid[])', [ids]),
+    query(
+      `select id, telegram_id, username, first_name, last_name
+         from app_users where id = any($1::uuid[])`,
+      [[...new Set(orders.map((o) => o.user_id))]]
+    ),
   ]);
-  const itemRows = unwrap(items, 'admin order items');
-  const userRows = unwrap(users, 'admin order users');
-  const userById = new Map(userRows.map((u) => [u.id, u]));
+  const userById = new Map(users.map((u) => [u.id, u]));
 
   return orders.map((o) => ({
-    ...toPublicOrder(o, itemRows.filter((i) => i.order_id === o.id)),
+    ...toPublicOrder(o, items.filter((i) => i.order_id === o.id)),
     telegramId: String(o.telegram_id),
     username: userById.get(o.user_id)?.username ?? null,
-    proofPath: o.payment_proof_path ?? null,
   }));
-}
-
-/** Short-lived signed URL so an admin can see the screenshot without the bucket being public. */
-export async function getProofUrl(orderId, { expiresIn = 300 } = {}) {
-  const order = unwrap(
-    await supabase.from('orders').select('payment_proof_path').eq('id', orderId).maybeSingle(),
-    'load proof path'
-  );
-  if (!order?.payment_proof_path) return null;
-
-  const { data, error } = await supabase.storage
-    .from(config.supabase.proofBucket)
-    .createSignedUrl(order.payment_proof_path, expiresIn);
-  if (error) {
-    log.error('Signed URL failed', { error: error.message });
-    return null;
-  }
-  return data.signedUrl;
 }
 
 /** Push a paid order into the Google Sheet. Never blocks the approval itself. */
 async function collateToSheets(order, admin) {
-  const [items, categories, buyer] = await Promise.all([
-    supabase.from('order_items').select('*').eq('order_id', order.id),
-    supabase.from('categories').select('id, name'),
-    supabase.from('app_users').select('username').eq('id', order.user_id).maybeSingle(),
+  const [items, buyer] = await Promise.all([
+    query(
+      `select oi.*, c.name as category_name
+         from order_items oi
+         left join items i on i.id = oi.item_id
+         left join categories c on c.id = i.category_id
+        where oi.order_id = $1`,
+      [order.id]
+    ),
+    one('select username from app_users where id = $1', [order.user_id]),
   ]);
-  const itemRows = unwrap(items, 'sheet order items');
-  const catRows = unwrap(categories, 'sheet categories');
-
-  // order_items keeps a snapshot, so look the category up via the live item.
-  const itemIds = [...new Set(itemRows.map((i) => i.item_id))];
-  const liveItems = itemIds.length
-    ? unwrap(await supabase.from('items').select('id, category_id').in('id', itemIds), 'sheet items')
-    : [];
-  const catById = new Map(catRows.map((c) => [c.id, c.name]));
-  const catByItem = new Map(liveItems.map((i) => [i.id, catById.get(i.category_id) ?? '']));
 
   const ok = await sheets.recordOrder({
     order: {
       ...order,
-      reviewer_name: admin ? [admin.first_name, admin.last_name].filter(Boolean).join(' ') || admin.username : '',
+      reviewer_name: admin
+        ? [admin.first_name, admin.last_name].filter(Boolean).join(' ') || admin.username
+        : '',
     },
-    items: itemRows.map((i) => ({ ...i, category_name: catByItem.get(i.item_id) ?? '' })),
-    user: unwrap(buyer, 'sheet buyer'),
+    items,
+    user: buyer,
   });
 
   if (ok) {
-    await supabase.from('orders')
-      .update({ sheet_synced_at: new Date().toISOString() })
-      .eq('id', order.id);
+    await query('update orders set sheet_synced_at = now() where id = $1', [order.id]);
   }
   return ok;
 }
 
 export async function approveOrder({ orderId, admin, note }) {
-  const { data, error } = await supabase.rpc('approve_order', {
-    p_order_id: orderId,
-    p_admin_id: admin.id,
-    p_note: note ?? null,
-  });
-  if (error) {
-    const friendly = parseRpcError(error);
-    throw new OrderError(friendly?.message ?? 'Could not approve that order.', friendly?.code ?? 'APPROVE_FAILED', 409);
+  let order;
+  try {
+    order = await rpc('approve_order', [orderId, admin.id, note ?? null]);
+  } catch (err) {
+    const friendly = parseDbError(err);
+    throw new OrderError(
+      friendly?.message ?? 'Could not approve that order.',
+      friendly?.code ?? 'APPROVE_FAILED', 409
+    );
   }
 
-  const order = Array.isArray(data) ? data[0] : data;
   log.info('Order approved', { code: order.code, admin: admin.telegram_id });
-
   await collateToSheets(order, admin);
   return toPublicOrder(order, await loadItems(order.id));
 }
 
 export async function rejectOrder({ orderId, admin, note, status = 'rejected' }) {
-  const { data, error } = await supabase.rpc('release_order', {
-    p_order_id: orderId,
-    p_admin_id: admin.id,
-    p_status: status,
-    p_note: note ?? null,
-  });
-  if (error) {
-    const friendly = parseRpcError(error);
-    throw new OrderError(friendly?.message ?? 'Could not reject that order.', friendly?.code ?? 'REJECT_FAILED', 409);
+  let order;
+  try {
+    order = await rpc('release_order', [orderId, admin.id, status, note ?? null]);
+  } catch (err) {
+    const friendly = parseDbError(err);
+    throw new OrderError(
+      friendly?.message ?? 'Could not reject that order.',
+      friendly?.code ?? 'REJECT_FAILED', 409
+    );
   }
-  const order = Array.isArray(data) ? data[0] : data;
   log.info('Order rejected', { code: order.code, admin: admin.telegram_id, status });
   return toPublicOrder(order, await loadItems(order.id));
 }
 
 /** Mark a paid order as handed over at the collection point. */
 export async function markCollected({ orderId, admin }) {
-  const order = unwrap(
-    await supabase.from('orders').select(ORDER_FIELDS).eq('id', orderId).maybeSingle(),
-    'load order'
-  );
+  const order = await one('select id, status from orders where id = $1', [orderId]);
   if (!order) throw new OrderError('Order not found.', 'ORDER_NOT_FOUND', 404);
   if (order.status !== 'paid') {
     throw new OrderError('Only a paid order can be collected.', 'NOT_PAID', 409);
   }
 
-  const updated = unwrap(
-    await supabase.from('orders').update({
-      status: 'collected', reviewed_by: admin.id, reviewed_at: new Date().toISOString(),
-    }).eq('id', orderId).select(ORDER_FIELDS).single(),
-    'mark collected'
+  const updated = await one(
+    `update orders set status = 'collected', reviewed_by = $1, reviewed_at = now()
+      where id = $2 returning ${ORDER_COLUMNS}`,
+    [admin.id, orderId]
   );
 
   await sheets.updateOrderStatus(updated);
   return toPublicOrder(updated, await loadItems(updated.id));
 }
 
-/** Counts for the admin dashboard. */
+/** Counts for the admin dashboard, in one round trip. */
 export async function getStats() {
-  const [pending, paid, today, revenue] = await Promise.all([
-    supabase.from('orders').select('id', { count: 'exact', head: true }).eq('status', 'pending_review'),
-    supabase.from('orders').select('id', { count: 'exact', head: true }).eq('status', 'paid'),
-    supabase.from('orders').select('id', { count: 'exact', head: true })
-      .gte('created_at', new Date(Date.now() - 86400000).toISOString()),
-    supabase.from('orders').select('total_cents').in('status', ['paid', 'collected']),
-  ]);
+  const row = await one(`
+    select
+      count(*) filter (where status = 'pending_review')                as pending_review,
+      count(*) filter (where status = 'paid')                          as awaiting_collection,
+      count(*) filter (where created_at > now() - interval '24 hours') as orders_last_24h,
+      coalesce(sum(total_cents) filter (where status in ('paid','collected')), 0) as revenue_cents
+    from orders
+  `);
 
-  const revenueCents = (unwrap(revenue, 'revenue') ?? []).reduce((s, r) => s + r.total_cents, 0);
   return {
-    pendingReview: pending.count ?? 0,
-    awaitingCollection: paid.count ?? 0,
-    ordersLast24h: today.count ?? 0,
-    revenue: (revenueCents / 100).toFixed(2),
+    pendingReview: Number(row?.pending_review ?? 0),
+    awaitingCollection: Number(row?.awaiting_collection ?? 0),
+    ordersLast24h: Number(row?.orders_last_24h ?? 0),
+    revenue: (Number(row?.revenue_cents ?? 0) / 100).toFixed(2),
   };
 }
 
 /** Release stock held by orders nobody ever paid for. */
 export async function expireStaleOrders() {
-  const { data, error } = await supabase.rpc('expire_stale_orders');
-  if (error) {
-    log.error('expire_stale_orders failed', { error: error.message });
+  try {
+    const row = await one('select expire_stale_orders() as n');
+    const n = Number(row?.n ?? 0);
+    if (n > 0) log.info('Expired stale orders', { count: n });
+    return n;
+  } catch (err) {
+    log.error('expire_stale_orders failed', { error: err.message });
     return 0;
   }
-  if (data > 0) log.info('Expired stale orders', { count: data });
-  return data ?? 0;
+}
+
+/** Drop screenshots for long-settled orders so the disk does not fill. */
+export async function pruneOldProofs(days = 60) {
+  try {
+    const row = await one('select prune_old_proofs($1) as n', [days]);
+    const n = Number(row?.n ?? 0);
+    if (n > 0) log.info('Pruned old payment proofs', { count: n });
+    return n;
+  } catch (err) {
+    log.error('prune_old_proofs failed', { error: err.message });
+    return 0;
+  }
 }
 
 export default {
-  placeOrder, getOrder, getOrderWithPayment, listUserOrders, attachPaymentProof, cancelOrder,
-  listOrders, getProofUrl, approveOrder, rejectOrder, markCollected, getStats, expireStaleOrders,
-  OrderError,
+  placeOrder, getOrder, getOrderWithPayment, listUserOrders, attachPaymentProof,
+  getProof, cancelOrder, listOrders, approveOrder, rejectOrder, markCollected,
+  getStats, expireStaleOrders, pruneOldProofs, OrderError,
 };

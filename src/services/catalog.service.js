@@ -1,6 +1,6 @@
-import { supabase, unwrap } from '../lib/supabase.js';
+import { query, one } from '../lib/db.js';
 
-const ITEM_FIELDS = `
+const ITEM_COLUMNS = `
   id, sku, name, variant, description, price_cents, emoji, image_url,
   is_special, is_top_pick, is_active, stock, reserved, low_stock_at, sort_order,
   updated_at, category_id
@@ -34,14 +34,12 @@ function toPublicItem(row, category) {
 
 /** Full catalogue grouped by category, ready to render. */
 export async function getCatalog({ includeInactive = false } = {}) {
-  const categories = unwrap(
-    await supabase.from('categories').select('*').order('sort_order'),
-    'load categories'
+  const categories = await query('select * from categories order by sort_order');
+  const items = await query(
+    `select ${ITEM_COLUMNS} from items
+     ${includeInactive ? '' : 'where is_active'}
+     order by sort_order`
   );
-
-  let query = supabase.from('items').select(ITEM_FIELDS).order('sort_order');
-  if (!includeInactive) query = query.eq('is_active', true);
-  const items = unwrap(await query, 'load items');
 
   const byId = new Map(categories.map((c) => [c.id, c]));
 
@@ -66,14 +64,8 @@ export async function getCatalog({ includeInactive = false } = {}) {
 
 /** Everything an admin needs, including hidden items and raw stock numbers. */
 export async function getAdminCatalog() {
-  const categories = unwrap(
-    await supabase.from('categories').select('*').order('sort_order'),
-    'load categories'
-  );
-  const items = unwrap(
-    await supabase.from('items').select(ITEM_FIELDS).order('sort_order'),
-    'load items'
-  );
+  const categories = await query('select * from categories order by sort_order');
+  const items = await query(`select ${ITEM_COLUMNS} from items order by sort_order`);
   const byId = new Map(categories.map((c) => [c.id, c]));
 
   return {
@@ -98,36 +90,43 @@ export async function getAdminCatalog() {
 
 /** Rows for the Google Sheets catalogue mirror. */
 export async function getCatalogForSheets() {
-  const categories = unwrap(await supabase.from('categories').select('*'), 'load categories');
-  const items = unwrap(await supabase.from('items').select('*').order('sort_order'), 'load items');
-  const byId = new Map(categories.map((c) => [c.id, c]));
-  return items.map((i) => ({ ...i, category: byId.get(i.category_id) ?? null }));
+  const rows = await query(`
+    select i.*,
+           json_build_object(
+             'name', c.name, 'kind', c.kind, 'collection_point', c.collection_point
+           ) as category
+    from items i
+    join categories c on c.id = i.category_id
+    order by c.sort_order, i.sort_order
+  `);
+  return rows;
 }
 
 export async function getSettings() {
-  const rows = unwrap(await supabase.from('settings').select('*'), 'load settings');
+  const rows = await query('select key, value from settings');
   return Object.fromEntries(rows.map((r) => [r.key, r.value]));
 }
 
 export async function setSetting(key, value) {
-  return unwrap(
-    await supabase.from('settings')
-      .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' })
-      .select('*').single(),
-    'save setting'
+  return one(
+    `insert into settings(key, value, updated_at) values ($1, $2::jsonb, now())
+     on conflict (key) do update set value = excluded.value, updated_at = now()
+     returning *`,
+    [key, JSON.stringify(value)]
   );
 }
 
 /** Items at or below their low-stock threshold — drives the admin alert badge. */
 export async function getLowStockItems() {
-  const items = unwrap(
-    await supabase.from('items').select(ITEM_FIELDS).eq('is_active', true),
-    'load items'
-  );
-  return items
-    .map((i) => ({ ...i, available: Math.max((i.stock ?? 0) - (i.reserved ?? 0), 0) }))
-    .filter((i) => i.available <= (i.low_stock_at ?? 0))
-    .sort((a, b) => a.available - b.available);
+  return query(`
+    select ${ITEM_COLUMNS}, greatest(stock - reserved, 0) as available
+    from items
+    where is_active and greatest(stock - reserved, 0) <= low_stock_at
+    order by available asc, name asc
+  `);
 }
 
-export default { getCatalog, getAdminCatalog, getCatalogForSheets, getSettings, setSetting, getLowStockItems };
+export default {
+  getCatalog, getAdminCatalog, getCatalogForSheets,
+  getSettings, setSetting, getLowStockItems,
+};

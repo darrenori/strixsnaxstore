@@ -4,8 +4,8 @@ import crypto from 'node:crypto';
 
 const BOT_TOKEN = '8900764054:TEST-TOKEN-FOR-UNIT-TESTS-ONLY';
 process.env.TELEGRAM_BOT_TOKEN = BOT_TOKEN;
-process.env.SUPABASE_URL = 'https://test.supabase.co';
-process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-key';
+process.env.DATABASE_URL = 'postgres://test:test@127.0.0.1:1/testdb';
+process.env.DATABASE_SSL = 'false';
 process.env.SHEETS_ENABLED = 'false';
 process.env.NODE_ENV = 'test';
 process.env.LOG_LEVEL = 'error';
@@ -36,10 +36,14 @@ function signInitData(fields) {
 
 test('health check answers without any Telegram data', async () => {
   const res = await fetch(`${base}/healthz`);
-  assert.equal(res.status, 200);
   const body = await res.json();
-  assert.equal(body.ok, true);
   assert.equal(body.service, 'strix-snax-store');
+  // The check touches Postgres, so it means "can serve orders", not merely
+  // "process is alive". No database is reachable in tests, so it must fail —
+  // a 200 here would mean the check is not actually checking anything.
+  assert.equal(res.status, 503);
+  assert.equal(body.ok, false);
+  assert.equal(body.db, false);
 });
 
 test('the Mini App shell is served at the root', async () => {

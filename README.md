@@ -45,7 +45,7 @@ screenshot, and every confirmed sale written into Google Sheets.
 Telegram client
       │  initData (HMAC-signed by Telegram with the bot token)
       ▼
-Express API  ──────────────►  Supabase Postgres
+Express API  ──────────────►  Postgres
       │                        · catalogue, stock, orders, ledger
       │                        · SQL functions hold the money logic
       │                        · private bucket for payment screenshots
@@ -69,11 +69,11 @@ Express API  ──────────────►  Supabase Postgres
 - **Stock.** The same row lock means two people cannot buy the same last packet.
   Placing an order *reserves* stock; only an admin approval spends it, and a
   rejection or a 45-minute timeout puts it back.
-- **Keys.** The Supabase service-role key stays on the server. The Mini App
-  never receives a database key of any kind. RLS is on regardless, so even a
-  leaked anon key reads nothing but the public menu.
-- **Screenshots** go to a private bucket. Admins view them through signed URLs
-  that expire in five minutes.
+- **Keys.** The database URL stays on the server. The Mini App never receives a
+  database credential of any kind — it talks only to our own `/api` routes.
+- **Screenshots** live in the database and have no URL of their own. An admin
+  fetches one through a route behind both the signature check and the admin
+  gate, so there is nothing guessable to share or leak.
 - **Uploads** are checked by magic bytes, not by the filename or the
   client-declared MIME type.
 
@@ -81,18 +81,17 @@ Express API  ──────────────►  Supabase Postgres
 
 ## Setup
 
-### 1. Supabase
+### 1. A Postgres database
 
-Create a project, then from the repo root:
+Any Postgres 14+ works — Neon, Supabase, Render, Fly, or one on your laptop.
+The app talks plain SQL through `pg`, with no vendor SDK, so moving between
+providers is only ever a change of `DATABASE_URL`.
 
 ```bash
-cp .env.example .env      # fill in SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_DB_URL
+cp .env.example .env      # fill in DATABASE_URL
 npm install
-npm run db:setup          # applies supabase/schema.sql then supabase/seed.sql
+npm run db:setup          # applies db/schema.sql then db/seed.sql
 ```
-
-No `SUPABASE_DB_URL`? Paste `supabase/schema.sql` and then `supabase/seed.sql`
-into the Supabase SQL editor instead — same result.
 
 The seed is the menu straight off the two posters: Hello Panda, Roller
 Coasters, Fish Crackers, the noodle wall, Lotte Pepero, the Under $1 deals,
@@ -213,9 +212,10 @@ src/
   routes/                HTTP surface, zod-validated
   bot/                   Telegraf handlers and notifications
 public/                  the Mini App (vanilla ES modules, no build step)
-supabase/
-  schema.sql             tables, SQL functions, RLS, storage bucket
+db/
+  schema.sql             tables and the SQL functions holding the money logic
   seed.sql               the menu from the posters
+  test-logic.sql         14 assertions, run inside a rolled-back transaction
 scripts/                 db setup, sheet bootstrap, sync, syntax lint
 tests/                   node:test — auth, PayNow, HTTP
 ```
@@ -230,15 +230,16 @@ the umbrella `googleapis` package, which bundles every Google API and costs
 ## Tests
 
 ```bash
-npm test        # 28 tests: signature forgery, PayNow payloads, HTTP auth
+npm test        # 28 unit tests: signature forgery, PayNow payloads, HTTP auth
 npm run check   # parse every file, then run the tests
+npm run test:e2e   # 28 more against a live database (see below)
 ```
 
 The money and stock rules live in SQL, so they are tested in SQL. Against a
 scratch database that has `schema.sql` and `seed.sql` applied:
 
 ```bash
-psql -d strix -v ON_ERROR_STOP=1 -f supabase/test-logic.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/test-logic.sql
 ```
 
 14 assertions covering server-side totals, stock reservation, idempotent

@@ -59,12 +59,23 @@ router.get('/admin/orders', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-/** Short-lived signed URL for the payment screenshot. */
+/**
+ * Stream the payment screenshot back to an admin.
+ *
+ * The image is never given a public URL: this route sits behind the same
+ * Telegram-signature check as everything else plus the admin gate, so the only
+ * way to see a screenshot is to be an admin at that moment.
+ */
 router.get('/admin/orders/:id/proof', async (req, res, next) => {
   try {
-    const url = await orders.getProofUrl(req.params.id);
-    if (!url) return res.status(404).json({ error: 'No screenshot on that order.' });
-    return res.json({ url, expiresIn: 300 });
+    const proof = await orders.getProof(req.params.id);
+    if (!proof) return res.status(404).json({ error: 'No screenshot on that order.' });
+
+    res.setHeader('Content-Type', proof.mime_type);
+    res.setHeader('Content-Length', proof.byte_size);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('Content-Disposition', 'inline');
+    return res.end(proof.bytes);
   } catch (err) { return next(err); }
 });
 

@@ -1,4 +1,4 @@
-import { supabase, unwrap } from '../lib/supabase.js';
+import { query, one } from '../lib/db.js';
 import { getBot } from './index.js';
 import log from '../lib/logger.js';
 
@@ -35,9 +35,8 @@ function orderLines(order) {
 
 /** Tell every admin that a screenshot is waiting for review. */
 export async function notifyAdminsOfOrder(order, buyer) {
-  const admins = unwrap(
-    await supabase.from('app_users').select('telegram_id').eq('is_admin', true).eq('is_blocked', false),
-    'load admins'
+  const admins = await query(
+    'select telegram_id from app_users where is_admin and not is_blocked'
   );
   if (admins.length === 0) {
     log.warn('Order needs review but no admins exist', { code: order.code });
@@ -84,21 +83,17 @@ export async function notifyBuyerOfDecision(order, decision) {
   const body = messages[decision];
   if (!body) return false;
 
-  const order_row = unwrap(
-    await supabase.from('orders').select('telegram_id').eq('id', order.id).maybeSingle(),
-    'load order telegram id'
-  );
-  if (!order_row) return false;
+  const row = await one('select telegram_id from orders where id = $1', [order.id]);
+  if (!row) return false;
 
-  return send(order_row.telegram_id, body);
+  return send(row.telegram_id, body);
 }
 
 /** Nightly-ish nudge when the shelf is running dry. */
 export async function notifyAdminsOfLowStock(items) {
   if (items.length === 0) return 0;
-  const admins = unwrap(
-    await supabase.from('app_users').select('telegram_id').eq('is_admin', true).eq('is_blocked', false),
-    'load admins'
+  const admins = await query(
+    'select telegram_id from app_users where is_admin and not is_blocked'
   );
 
   const list = items

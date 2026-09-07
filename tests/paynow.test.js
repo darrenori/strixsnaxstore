@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 process.env.TELEGRAM_BOT_TOKEN ??= '111:test';
-process.env.SUPABASE_URL ??= 'https://test.supabase.co';
-process.env.SUPABASE_SERVICE_ROLE_KEY ??= 'test-key';
+process.env.DATABASE_URL ??= 'postgres://test:test@127.0.0.1:1/testdb';
+
 process.env.PAYNOW_PROXY_TYPE = 'mobile';
 process.env.PAYNOW_PROXY_VALUE = '+6591234567';
 process.env.PAYNOW_MERCHANT_NAME = 'STRIX SNAX STORE';

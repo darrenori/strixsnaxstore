@@ -1,9 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
-import crypto from 'node:crypto';
 import { z } from 'zod';
 import * as orders from '../services/order.service.js';
-import { supabase } from '../lib/supabase.js';
 import { notifyAdminsOfOrder } from '../bot/notify.js';
 import config from '../config.js';
 import log from '../lib/logger.js';
@@ -115,23 +113,14 @@ router.post('/orders/:id/proof', upload.single('proof'), async (req, res, next) 
     if (!parsed.success) return res.status(400).json({ error: 'Invalid payment reference.' });
 
     // Owner check happens inside attachPaymentProof, but read the order first
-    // so we never write a stray object for someone else's order id.
-    const existing = await orders.getOrder(req.params.id, { userId: req.user.id });
-
-    const path = `${req.user.telegram_id}/${existing.code}-${crypto.randomBytes(6).toString('hex')}.${sniffed.ext}`;
-    const { error: uploadError } = await supabase.storage
-      .from(config.supabase.proofBucket)
-      .upload(path, req.file.buffer, { contentType: sniffed.mime, upsert: false });
-
-    if (uploadError) {
-      log.error('Proof upload failed', { error: uploadError.message, code: existing.code });
-      return res.status(502).json({ error: 'Could not save your screenshot. Try again.' });
-    }
+    // so a stray id never reaches the write path at all.
+    await orders.getOrder(req.params.id, { userId: req.user.id });
 
     const order = await orders.attachPaymentProof({
       orderId: req.params.id,
       user: req.user,
-      storagePath: path,
+      bytes: req.file.buffer,
+      mimeType: sniffed.mime,
       paymentRef: parsed.data.paymentRef || null,
     });
 

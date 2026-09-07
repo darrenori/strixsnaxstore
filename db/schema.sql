@@ -1,6 +1,6 @@
 -- ============================================================================
--- STRIX Snax Store — Supabase schema
--- Run this once in the Supabase SQL editor (or `supabase db push`).
+-- STRIX Snax Store — Postgres schema
+-- Applied by `npm run db:setup`, which is idempotent and safe to re-run.
 -- ============================================================================
 
 create extension if not exists "pgcrypto";
@@ -107,7 +107,7 @@ create table if not exists orders (
   total_cents       int  not null check (total_cents >= 0),
   collection_points text[] not null default '{}',
   note              text,
-  payment_proof_path text,                         -- private storage object path
+  payment_proof_id  uuid,                          -- -> payment_proofs.id
   payment_ref       text,                          -- what the buyer typed in PayNow
   reviewed_by       uuid references app_users(id),
   reviewed_at       timestamptz,
@@ -472,36 +472,50 @@ begin
 end $$;
 
 -- ============================================================================
--- Row Level Security.
--- The API talks to Postgres with the service_role key from the server only;
--- the anon key is never shipped to the Mini App. RLS is belt-and-braces so a
--- leaked anon key still reads nothing but the public menu.
+-- Payment screenshots.
+--
+-- These live in the database rather than an object store so the deployment
+-- needs nothing but Postgres. They are never public: an admin fetches one
+-- through an authenticated route that streams the bytes back, so there is no
+-- guessable URL to leak. `prune_old_proofs` keeps the table from growing
+-- without bound on a small disk.
 -- ============================================================================
-alter table categories      enable row level security;
-alter table items           enable row level security;
-alter table app_users       enable row level security;
-alter table orders          enable row level security;
-alter table order_items     enable row level security;
-alter table stock_movements enable row level security;
-alter table settings        enable row level security;
+create table if not exists payment_proofs (
+  id           uuid primary key default gen_random_uuid(),
+  order_id     uuid not null references orders(id) on delete cascade,
+  mime_type    text not null check (mime_type in ('image/jpeg','image/png','image/webp','image/heic')),
+  byte_size    int  not null check (byte_size > 0 and byte_size <= 10485760),
+  bytes        bytea not null,
+  uploaded_by  uuid references app_users(id) on delete set null,
+  created_at   timestamptz not null default now()
+);
 
-drop policy if exists categories_read on categories;
-create policy categories_read on categories for select using (true);
+create index if not exists payment_proofs_order_idx on payment_proofs(order_id, created_at desc);
 
-drop policy if exists items_read on items;
-create policy items_read on items for select using (is_active);
+do $$ begin
+  alter table orders
+    add constraint orders_proof_fk
+    foreign key (payment_proof_id) references payment_proofs(id) on delete set null;
+exception when duplicate_object then null; end $$;
 
--- No anon policy at all on the rest => anon sees nothing.
--- service_role bypasses RLS, which is what the API server uses.
-
--- ---------------------------------------------------------------------------
--- Private bucket for PayNow screenshots. Admins read them through short-lived
--- signed URLs minted server-side; the bucket itself is never public.
--- ---------------------------------------------------------------------------
-insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-values ('payment-proofs', 'payment-proofs', false, 10485760,
-        array['image/jpeg','image/png','image/webp','image/heic'])
-on conflict (id) do update
-  set public = false,
-      file_size_limit = excluded.file_size_limit,
-      allowed_mime_types = excluded.allowed_mime_types;
+/**
+ * Delete screenshots for orders settled more than `p_days` ago. The order row
+ * and its receipt stay; only the image goes. Run from the janitor.
+ */
+create or replace function prune_old_proofs(p_days int default 60) returns int
+language plpgsql
+as $$
+declare v_n int;
+begin
+  with gone as (
+    delete from payment_proofs p
+    using orders o
+    where p.order_id = o.id
+      and o.status in ('paid','collected','rejected','cancelled')
+      and o.reviewed_at is not null
+      and o.reviewed_at < now() - make_interval(days => p_days)
+    returning p.id
+  )
+  select count(*) into v_n from gone;
+  return v_n;
+end $$;

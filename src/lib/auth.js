@@ -1,5 +1,5 @@
 import { verifyInitData, displayNameOf, InitDataError } from './telegram-auth.js';
-import { supabase, unwrap } from './supabase.js';
+import { one } from './db.js';
 import config from '../config.js';
 import log from './logger.js';
 
@@ -11,39 +11,25 @@ import log from './logger.js';
 export async function upsertUser(tgUser) {
   const shouldBeAdmin = config.store.bootstrapAdminIds.includes(tgUser.id);
 
-  const existing = unwrap(
-    await supabase.from('app_users').select('*').eq('telegram_id', tgUser.id).maybeSingle(),
-    'load user'
-  );
-
-  if (existing) {
-    const patch = {
-      username: tgUser.username,
-      first_name: tgUser.firstName,
-      last_name: tgUser.lastName,
-      photo_url: tgUser.photoUrl,
-      last_seen_at: new Date().toISOString(),
-    };
-    // Env bootstrap can promote, but never demotes an admin granted in-app.
-    if (shouldBeAdmin && !existing.is_admin) patch.is_admin = true;
-
-    return unwrap(
-      await supabase.from('app_users').update(patch).eq('id', existing.id).select('*').single(),
-      'update user'
-    );
-  }
-
-  return unwrap(
-    await supabase.from('app_users').insert({
-      telegram_id: tgUser.id,
-      username: tgUser.username,
-      first_name: tgUser.firstName,
-      last_name: tgUser.lastName,
-      photo_url: tgUser.photoUrl,
-      display_name: displayNameOf(tgUser),
-      is_admin: shouldBeAdmin,
-    }).select('*').single(),
-    'create user'
+  // One statement, so two devices opening the app at once cannot race to
+  // insert the same telegram_id. `is_admin` is only ever raised here, never
+  // lowered — an admin granted in-app survives an env change.
+  return one(
+    `insert into app_users(telegram_id, username, first_name, last_name, photo_url,
+                           display_name, is_admin)
+     values ($1, $2, $3, $4, $5, $6, $7)
+     on conflict (telegram_id) do update set
+       username     = excluded.username,
+       first_name   = excluded.first_name,
+       last_name    = excluded.last_name,
+       photo_url    = excluded.photo_url,
+       is_admin     = app_users.is_admin or excluded.is_admin,
+       last_seen_at = now()
+     returning *`,
+    [
+      tgUser.id, tgUser.username, tgUser.firstName, tgUser.lastName,
+      tgUser.photoUrl, displayNameOf(tgUser), shouldBeAdmin,
+    ]
   );
 }
 
@@ -93,10 +79,7 @@ export function requireAdmin(req, res, next) {
 /** True when this Telegram id may act as an admin (used by the bot). */
 export async function isAdminTelegramId(telegramId) {
   if (config.store.bootstrapAdminIds.includes(Number(telegramId))) return true;
-  const row = unwrap(
-    await supabase.from('app_users').select('is_admin').eq('telegram_id', telegramId).maybeSingle(),
-    'admin check'
-  );
+  const row = await one('select is_admin from app_users where telegram_id = $1', [telegramId]);
   return Boolean(row?.is_admin);
 }
 

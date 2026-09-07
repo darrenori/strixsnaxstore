@@ -32,6 +32,21 @@ async function request(path, { method = 'GET', body, formData, signal } = {}) {
   return data;
 }
 
+/** Fetch a binary response (the payment screenshot) as an object URL. */
+async function requestBlob(path) {
+  const res = await fetch(`/api${path}`, {
+    headers: { 'X-Telegram-Init-Data': initData() },
+  });
+  if (!res.ok) {
+    let message = `Request failed (${res.status})`;
+    try { message = (await res.json()).error ?? message; } catch { /* not JSON */ }
+    const err = new Error(message);
+    err.status = res.status;
+    throw err;
+  }
+  return URL.createObjectURL(await res.blob());
+}
+
 export const api = {
   me:            () => request('/me'),
   catalog:       () => request('/catalog'),
@@ -45,7 +60,9 @@ export const api = {
   // --- admin ---------------------------------------------------------------
   adminSummary:  () => request('/admin/summary'),
   adminOrders:   (status) => request(`/admin/orders${status ? `?status=${encodeURIComponent(status)}` : ''}`),
-  adminProof:    (id) => request(`/admin/orders/${id}/proof`),
+  // The screenshot comes back as raw bytes behind the admin gate, so it needs
+  // its own fetch: turn it into an object URL the <img> can point at.
+  adminProof:    (id) => requestBlob(`/admin/orders/${id}/proof`),
   approve:       (id, note) => request(`/admin/orders/${id}/approve`, { method: 'POST', body: { note } }),
   reject:        (id, note) => request(`/admin/orders/${id}/reject`, { method: 'POST', body: { note } }),
   collected:     (id) => request(`/admin/orders/${id}/collected`, { method: 'POST' }),

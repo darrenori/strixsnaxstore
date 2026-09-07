@@ -64,11 +64,13 @@ function orderReviewCard(order, refresh) {
     const view = el('button', { class: 'btn btn--sm btn--ghost', type: 'button' }, '🖼 VIEW SCREENSHOT');
     view.addEventListener('click', () => withBusy(view, 'LOADING', async () => {
       try {
-        const { url } = await api.adminProof(order.id);
-        proofSlot.replaceChildren(
-          el('img', { class: 'proof-img', src: url, alt: `Payment proof for ${order.code}` }),
-          el('a', { class: 'muted', href: url, target: '_blank', rel: 'noopener' }, 'Open full size ↗')
-        );
+        const url = await api.adminProof(order.id);
+        const img = el('img', {
+          class: 'proof-img', src: url, alt: `Payment proof for ${order.code}`,
+        });
+        // Release the blob once the browser has decoded it.
+        img.addEventListener('load', () => URL.revokeObjectURL(url), { once: true });
+        proofSlot.replaceChildren(img);
       } catch (err) {
         toast(err.message, 'error');
       }

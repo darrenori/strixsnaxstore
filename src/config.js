@@ -55,10 +55,11 @@ export const config = {
     initDataMaxAgeSeconds: intOf('TELEGRAM_INITDATA_MAX_AGE', 24 * 60 * 60),
   },
 
-  supabase: {
-    url: required('SUPABASE_URL'),
-    serviceKey: required('SUPABASE_SERVICE_ROLE_KEY'),
-    proofBucket: optional('SUPABASE_PROOF_BUCKET', 'payment-proofs'),
+  db: {
+    /** Render supplies DATABASE_URL automatically when a database is linked. */
+    url: required('DATABASE_URL'),
+    ssl: bool('DATABASE_SSL', true),
+    poolMax: intOf('DATABASE_POOL_MAX', 5),
   },
 
   sheets: {

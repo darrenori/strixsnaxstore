@@ -11,8 +11,9 @@ import catalogRoutes from './routes/catalog.js';
 import orderRoutes from './routes/orders.js';
 import adminRoutes from './routes/admin.js';
 import { launchBot, getBot } from './bot/index.js';
-import { expireStaleOrders } from './services/order.service.js';
+import { expireStaleOrders, pruneOldProofs } from './services/order.service.js';
 import { ensureTabs, sheetsEnabled } from './lib/sheets.js';
+import { ping as pingDb, close as closeDb } from './lib/db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, '..', 'public');
@@ -37,7 +38,7 @@ app.use(helmet({
       styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
       fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
       imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
-      connectSrc: ["'self'", 'https://*.supabase.co'],
+      connectSrc: ["'self'"],
       frameAncestors: ["'self'", 'https://web.telegram.org', 'https://*.telegram.org'],
       objectSrc: ["'none'"],
       baseUri: ["'self'"],
@@ -55,10 +56,19 @@ app.use(express.urlencoded({ extended: false, limit: '256kb' }));
 // ---------------------------------------------------------------------------
 // Health check — before auth so uptime pings do not need Telegram data.
 // ---------------------------------------------------------------------------
-app.get('/healthz', (req, res) => {
-  res.json({
-    ok: true,
+app.get('/healthz', async (req, res) => {
+  // Touch the database so a health check actually means "can serve orders",
+  // not merely "the process is alive".
+  let db = false;
+  try {
+    await pingDb();
+    db = true;
+  } catch { /* reported below */ }
+
+  res.status(db ? 200 : 503).json({
+    ok: db,
     service: 'strix-snax-store',
+    db,
     sheets: sheetsEnabled(),
     bot: Boolean(getBot()),
     uptime: Math.round(process.uptime()),
@@ -159,6 +169,9 @@ app.use((err, req, res, _next) => {
 // Boot
 // ---------------------------------------------------------------------------
 async function main() {
+  // Fail loudly here rather than on a shopper's first order.
+  await pingDb();
+
   const server = app.listen(config.port, () => {
     log.info('HTTP server listening', { port: config.port, publicUrl: config.publicUrl || '(unset)' });
   });
@@ -175,16 +188,25 @@ async function main() {
     log.warn('Google Sheets is not configured — orders will not be collated');
   }
 
-  // Put stock held by abandoned checkouts back on the shelf.
+  // Put stock held by abandoned checkouts back on the shelf, and keep the
+  // screenshot table from growing without bound on a small disk.
+  let sweeps = 0;
   const janitor = setInterval(() => {
     expireStaleOrders().catch((err) => log.error('Janitor failed', { error: err.message }));
+    // Roughly daily, given a 5-minute tick.
+    if (sweeps++ % 288 === 0) {
+      pruneOldProofs().catch((err) => log.error('Proof prune failed', { error: err.message }));
+    }
   }, 5 * 60 * 1000);
   janitor.unref();
 
   const shutdown = (signal) => {
     log.info('Shutting down', { signal });
     getBot()?.stop(signal);
-    server.close(() => process.exit(0));
+    server.close(async () => {
+      await closeDb();
+      process.exit(0);
+    });
     setTimeout(() => process.exit(1), 10_000).unref();
   };
   process.once('SIGINT', () => shutdown('SIGINT'));

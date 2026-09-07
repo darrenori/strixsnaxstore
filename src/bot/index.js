@@ -2,7 +2,7 @@ import { Telegraf } from 'telegraf';
 import config from '../config.js';
 import log from '../lib/logger.js';
 import { upsertUser, isAdminTelegramId } from '../lib/auth.js';
-import { supabase, unwrap } from '../lib/supabase.js';
+import { query, one } from '../lib/db.js';
 import * as catalogService from '../services/catalog.service.js';
 import { esc } from './notify.js';
 
@@ -98,13 +98,10 @@ export function createBot() {
 
   bot.command('orders', async (ctx) => {
     try {
-      const rows = unwrap(
-        await supabase.from('orders')
-          .select('code, status, total_cents, created_at')
-          .eq('telegram_id', ctx.from.id)
-          .order('created_at', { ascending: false })
-          .limit(8),
-        'bot orders'
+      const rows = await query(
+        `select code, status, total_cents, created_at from orders
+          where telegram_id = $1 order by created_at desc limit 8`,
+        [ctx.from.id]
       );
       if (rows.length === 0) return ctx.reply('You have not ordered anything yet. Try /start!');
 
@@ -140,7 +137,7 @@ export function createBot() {
     }
     try {
       const [pending, low] = await Promise.all([
-        supabase.from('orders').select('id', { count: 'exact', head: true }).eq('status', 'pending_review'),
+        one("select count(*)::int as n from orders where status = 'pending_review'"),
         catalogService.getLowStockItems(),
       ]);
       const keyboard = storeKeyboard();
@@ -150,7 +147,7 @@ export function createBot() {
 
       return ctx.replyWithHTML(
         `🛠 <b>Admin</b>\n\n` +
-        `🔍 Awaiting verification: <b>${pending.count ?? 0}</b>\n` +
+        `🔍 Awaiting verification: <b>${pending?.n ?? 0}</b>\n` +
         `📉 Low stock items: <b>${low.length}</b>\n` +
         (lowList ? `\n${lowList}\n` : '') +
         `\nOpen the store and switch to the <b>Admin</b> tab for stock taking and order review.`,
