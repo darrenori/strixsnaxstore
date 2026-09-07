@@ -17,7 +17,8 @@
     "check": "node scripts/lint-syntax.js && npm test",
     "db:setup": "node scripts/setup-db.js",
     "test": "node --test tests/*.test.js",
-    "test:e2e": "node tests/e2e.integration.mjs"
+    "test:e2e": "node tests/e2e.integration.mjs",
+    "test:vercel": "node tests/vercel.integration.mjs"
   },
   "dependencies": {
     "@googleapis/drive": "^22.0.0",
