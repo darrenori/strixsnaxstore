@@ -10,6 +10,7 @@ import { requireTelegramUser, requireAdmin } from './lib/auth.js';
 import catalogRoutes from './routes/catalog.js';
 import orderRoutes from './routes/orders.js';
 import adminRoutes from './routes/admin.js';
+import migrateRoutes from './routes/migrate.js';
 import { launchBot, getBot } from './bot/index.js';
 import { expireStaleOrders, pruneOldProofs } from './services/order.service.js';
 import { ensureTabs, sheetsEnabled } from './lib/sheets.js';
@@ -159,6 +160,11 @@ const writeLimiter = rateLimit({
 
 const api = express.Router();
 api.use(apiLimiter);
+
+// Bootstrap the database before anything can authenticate: there is no admin
+// to check against until the tables exist. Its own shared secret is the gate.
+api.use(migrateRoutes);
+
 api.use(requireTelegramUser);
 api.use(catalogRoutes);
 api.use('/orders', writeLimiter);

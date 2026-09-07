@@ -48,6 +48,9 @@ export const config = {
   /** Shared secret for the scheduled-maintenance endpoint. */
   cronSecret: optional('CRON_SECRET'),
 
+  /** Shared secret for the one-shot schema/seed endpoint. Unset = disabled. */
+  migrateSecret: optional('MIGRATE_SECRET'),
+
   telegram: {
     botToken: required('TELEGRAM_BOT_TOKEN'),
     // Long polling by default; set a webhook URL in production if you prefer.
