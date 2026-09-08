@@ -7,6 +7,7 @@
 html, body {
   margin: 0;
   padding: 0;
+  background: #fbf4d4;            /* literal, so a late token file never shows canvas */
   background: var(--bg);
   color: var(--ink);
   font-family: var(--font-body);

@@ -20,6 +20,8 @@ export function ready() {
   tg.disableVerticalSwipes?.();
   tg.setHeaderColor?.(GROUND);
   tg.setBackgroundColor?.(GROUND);
+  // 7.10+ draws a separate strip behind the nav bar; unset it stays theme-dark.
+  tg.setBottomBarColor?.(GROUND);
 }
 
 export function initData() {
@@ -40,6 +42,7 @@ export function applyTheme() {
   document.documentElement.dataset.theme = 'light';
   tg?.setHeaderColor?.(GROUND);
   tg?.setBackgroundColor?.(GROUND);
+  tg?.setBottomBarColor?.(GROUND);
 }
 
 export function haptic(type = 'light') {

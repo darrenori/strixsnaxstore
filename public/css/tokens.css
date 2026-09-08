@@ -5,6 +5,10 @@
    ========================================================================== */
 
 :root {
+  /* The poster is light by definition. Declaring this stops an Android client
+     in dark mode from handing the WebView a dark canvas underneath us. */
+  color-scheme: light;
+
   /* --- Poster palette ---------------------------------------------------- */
   --cream:        #fbf4d4;
   --cream-2:      #f6ecc0;
