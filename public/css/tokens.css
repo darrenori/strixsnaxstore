@@ -73,23 +73,7 @@
     repeating-conic-gradient(var(--gold) 0% 25%, var(--cream-2) 0% 50%) 0 0 / 34px 34px;
 }
 
-/* Telegram hands us the user's theme; we keep the poster's light identity but
-   soften the ground in dark mode so the app does not glare at 2am. */
-:root[data-theme='dark'] {
-  --bg:           #171310;
-  --surface:      #221c17;
-  --surface-alt:  #2b231c;
-  --cream:        #171310;
-  --cream-2:      #2b231c;
-  --cream-3:      #3a2f24;
-  --paper:        #221c17;
-  --ink:          #f6ecd2;
-  --ink-soft:     #c6b79b;
-  --ink-faint:    #8e816c;
-  --border:       rgba(246, 236, 210, .14);
-  --border-strong: rgba(246, 236, 210, .3);
-  --navy:         #35507c;
-  --heading:      #a8c5f0;
-  --shadow-block: 0 3px 0 rgba(0, 0, 0, .5);
-  --shadow-card:  0 2px 10px rgba(0, 0, 0, .4);
-}
+/* No dark variant. applyTheme() pins the document to light and asks Telegram
+   to match its chrome, because the poster identity this is built from does
+   not survive being recoloured. The dark token set that used to live here is
+   in the history if it is ever wanted back. */

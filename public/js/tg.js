@@ -9,14 +9,17 @@ export const tg = window.Telegram?.WebApp ?? null;
 
 export const inTelegram = Boolean(tg?.initData);
 
+/** The poster's cream. Everything else is drawn on top of it. */
+const GROUND = '#fbf4d4';
+
 export function ready() {
   if (!tg) return;
   tg.ready();
   tg.expand();
   // Stop a downward swipe from dismissing the app mid-checkout.
   tg.disableVerticalSwipes?.();
-  tg.setHeaderColor?.('#fbf4d4');
-  tg.setBackgroundColor?.('#fbf4d4');
+  tg.setHeaderColor?.(GROUND);
+  tg.setBackgroundColor?.(GROUND);
 }
 
 export function initData() {
@@ -27,15 +30,16 @@ export function user() {
   return tg?.initDataUnsafe?.user ?? null;
 }
 
-/** Mirror Telegram's light/dark choice onto our own token set. */
+/**
+ * The store is a printed poster — cream ground, red badge, gold lettering —
+ * and that identity does not survive being recoloured. Rendered dark it reads
+ * as some other shop, so the app stays light whatever the client is set to,
+ * and asks Telegram to bring its own chrome to match rather than the reverse.
+ */
 export function applyTheme() {
-  const scheme = tg?.colorScheme ?? (window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-  document.documentElement.dataset.theme = scheme;
-  if (tg) {
-    const bg = scheme === 'dark' ? '#171310' : '#fbf4d4';
-    tg.setHeaderColor?.(bg);
-    tg.setBackgroundColor?.(bg);
-  }
+  document.documentElement.dataset.theme = 'light';
+  tg?.setHeaderColor?.(GROUND);
+  tg?.setBackgroundColor?.(GROUND);
 }
 
 export function haptic(type = 'light') {
