@@ -133,21 +133,32 @@ no more env edits.
 npm run sheets:creds -- "C:\Users\you\Downloads\key.json"
 ```
 
-4. Create the spreadsheet and share it with the account you want to read it
-   from:
+4. Make a blank spreadsheet in your own Drive, press **Share**, and add the
+   service-account address as an **Editor** — `sheets:creds` prints it, and it
+   looks like `something@your-project.iam.gserviceaccount.com`.
+5. Point the store at it. Paste the URL straight from the browser:
 
 ```bash
-npm run sheets:bootstrap -- you@gmail.com
+npm run sheets:link -- "https://docs.google.com/spreadsheets/d/.../edit"
 ```
 
-That writes `GOOGLE_SHEETS_ID` into `.env` as well and prints the URL.
-Restart the server, then press **SYNC MENU TO SHEET** in the admin tab to
-confirm the credentials work — the catalogue should appear in *Items & Stock*.
+That proves the service account can open the file before it writes anything,
+puts `GOOGLE_SHEETS_ID` and `SHEETS_ENABLED` into `.env`, and creates the four
+tabs. If the share did not take it says so and prints the address to share
+with, rather than leaving you looking at an empty sheet wondering.
 
-Service accounts have no Drive storage quota of their own. If the bootstrap
-fails with `storageQuotaExceeded`, make a blank sheet in your own Drive, share
-it with the service-account email as **Editor**, and put that id in
-`GOOGLE_SHEETS_ID` instead.
+Then `npm run sheets:sync` fills *Items & Stock*, or press **SYNC MENU TO
+SHEET** in the admin tab.
+
+The service account can create the file itself instead —
+`npm run sheets:bootstrap -- you@gmail.com` — but service accounts have no
+Drive storage quota of their own, so on most projects that fails with
+`storageQuotaExceeded`. Sharing a sheet you already own sidesteps that and
+leaves the file somewhere you can find it.
+
+Deployed, the same four variables — `SHEETS_ENABLED`, `GOOGLE_SHEETS_ID`,
+`GOOGLE_SERVICE_ACCOUNT_EMAIL` and `GOOGLE_PRIVATE_KEY` — must be set on the
+host too. `.env` never leaves your machine.
 
 ### 5. PayNow
 

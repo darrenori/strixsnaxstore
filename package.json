@@ -15,6 +15,7 @@
     "seed": "node scripts/setup-db.js --seed-only",
     "sheets:creds": "node scripts/sheets-credentials.js",
     "sheets:bootstrap": "node scripts/bootstrap-sheets.js",
+    "sheets:link": "node scripts/link-sheet.js",
     "sheets:sync": "node scripts/sync-sheets.js",
     "check": "node scripts/lint-syntax.js && npm test && npm run test:local",
     "db:setup": "node scripts/setup-db.js",
