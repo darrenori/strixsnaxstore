@@ -1,6 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
+  "buildCommand": "node scripts/stamp-assets.js",
   "outputDirectory": "public",
   "functions": {
     "api/index.js": {
