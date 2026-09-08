@@ -68,7 +68,7 @@ export const config = {
   },
 
   db: {
-    /** Render supplies DATABASE_URL automatically when a database is linked. */
+    /** Postgres connection URI. Use the provider's pooled one on serverless. */
     url: required('DATABASE_URL'),
     ssl: bool('DATABASE_SSL', true),
     poolMax: intOf('DATABASE_POOL_MAX', 5),

@@ -18,8 +18,8 @@ pg.types.setTypeParser(20, (value) => (value === null ? null : Number(value)));
 
 export const pool = new pg.Pool({
   connectionString: config.db.url,
-  // Render terminates TLS with its own CA. The connection is encrypted; we
-  // just cannot chain-verify it without shipping their bundle.
+  // Managed Postgres providers terminate TLS with their own CA. The connection
+  // is encrypted; we just cannot chain-verify it without shipping their bundle.
   ssl: config.db.ssl ? { rejectUnauthorized: false } : false,
   max: config.db.poolMax,
   idleTimeoutMillis: 30_000,

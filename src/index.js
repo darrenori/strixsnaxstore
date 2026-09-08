@@ -22,8 +22,9 @@ const publicDir = path.join(__dirname, '..', 'public');
 
 const app = express();
 
-// Behind Render/Railway/Fly the client IP arrives in X-Forwarded-For; trusting
-// exactly one hop keeps rate limiting keyed on the real caller.
+// Behind Vercel, or any single reverse proxy, the client IP arrives in the
+// X-Forwarded-For header; trusting exactly one hop keeps rate limiting keyed
+// on the real caller rather than on the proxy.
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
 
