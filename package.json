@@ -2,7 +2,7 @@
   "name": "strix-snax-store",
   "version": "1.0.0",
   "private": true,
-  "description": "STRIX Snax Store \u2014 Telegram bot + Mini App storefront with Supabase backend, PayNow payment verification and Google Sheets collation.",
+  "description": "STRIX Snax Store — Telegram bot + Mini App storefront with Supabase backend, PayNow payment verification and Google Sheets collation.",
   "type": "module",
   "engines": {
     "node": ">=20"
@@ -15,11 +15,14 @@
     "seed": "node scripts/setup-db.js --seed-only",
     "sheets:bootstrap": "node scripts/bootstrap-sheets.js",
     "sheets:sync": "node scripts/sync-sheets.js",
-    "check": "node scripts/lint-syntax.js && npm test",
+    "check": "node scripts/lint-syntax.js && npm test && npm run test:local",
     "db:setup": "node scripts/setup-db.js",
     "test": "node --test tests/*.test.js",
     "test:e2e": "node tests/e2e.integration.mjs",
-    "test:vercel": "node tests/vercel.integration.mjs"
+    "test:vercel": "node tests/vercel.integration.mjs",
+    "test:local": "node scripts/test-local.js",
+    "test:flows": "node tests/flows.integration.mjs",
+    "test:bot": "node tests/bot.integration.mjs"
   },
   "dependencies": {
     "@googleapis/drive": "^22.0.0",
@@ -37,5 +40,9 @@
   },
   "overrides": {
     "qs": "^6.16.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@electric-sql/pglite-socket": "^0.2.11"
   }
 }
