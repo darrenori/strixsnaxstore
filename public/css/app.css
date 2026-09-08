@@ -1032,3 +1032,38 @@ img { max-width: 100%; display: block; }
 .mt { margin-top: 14px; }
 .mb0 { margin-bottom: 0; }
 .stack > * + * { margin-top: 10px; }
+
+/* ---------------------------------------------------------------------------
+   Disclosure — used on a rejected order to keep the "pay again" QR folded
+   away. It has to look deliberately closed, or a buyer taps it out of habit
+   and pays a second time.
+   --------------------------------------------------------------------------- */
+details.card > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 2px 0;
+  user-select: none;
+}
+details.card > summary::-webkit-details-marker { display: none; }
+details.card > summary::after {
+  content: '▸';
+  margin-left: auto;
+  font-family: var(--font-body);
+  color: var(--ink-faint);
+  transition: transform .18s ease;
+}
+details.card[open] > summary::after { transform: rotate(90deg); }
+details.card > summary:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 3px;
+  border-radius: var(--r-sm);
+}
+details.card > :not(summary) { margin-top: 12px; }
+
+@media (prefers-reduced-motion: reduce) {
+  details.card > summary::after { transition: none; }
+}

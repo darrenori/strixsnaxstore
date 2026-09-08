@@ -56,7 +56,7 @@ function receipt(order) {
   return card;
 }
 
-function qrCard(order, payment) {
+function qrCard(order, payment, { showTimer = true } = {}) {
   const card = el('section', { class: 'qr-card' },
     el('div', { class: 'qr-card__amount' }, `$${order.total}`),
     el('div', { class: 'qr-card__code' }, order.code)
@@ -77,9 +77,13 @@ function qrCard(order, payment) {
       : `Scan with your banking app, enter ${money(order.totalCents)} and put ${order.code} as the reference.`
   ));
 
-  const timer = el('p', { class: 'qr-card__timer' });
-  card.append(timer);
-  countdown(timer, order.expiresAt);
+  // A rejected order is not holding anything, so a countdown on it would be a
+  // lie — there is no reservation left to run out.
+  if (showTimer) {
+    const timer = el('p', { class: 'qr-card__timer' });
+    card.append(timer);
+    countdown(timer, order.expiresAt);
+  }
 
   return card;
 }
@@ -209,7 +213,10 @@ function waitingCard(order, rerender) {
     card.append(
       el('p', {}, '⚠️ An admin could not verify that payment.'),
       order.reviewNote ? el('p', { class: 'order__note' }, order.reviewNote) : null,
-      el('p', { class: 'muted' }, 'Your items were released. Place the order again to retry.')
+      el('p', { class: 'muted' },
+        'Upload another screenshot below and it goes straight back to the queue — '
+        + 'no need to start a new order. Your items were released in the meantime, '
+        + 'so if something has sold out since, we will tell you.')
     );
   } else if (order.status === 'cancelled') {
     card.append(el('p', {}, '✖️ This order was cancelled and the items are back on the shelf.'));
@@ -271,14 +278,24 @@ export function renderPayment(params) {
       root.append(cancel);
     } else if (order.status === 'rejected') {
       // Rejected orders can be re-proved without placing a whole new order.
-      root.append(
-        waitingCard(order, paint),
-        receipt(order),
-        uploader(order, (updated) => {
-          toast('Sent for verification 🎉', 'ok');
-          paint(updated, payment);
-        })
-      );
+      root.append(waitingCard(order, paint), receipt(order));
+
+      // Most rejections are a bad screenshot, not a missing payment, so the QR
+      // stays folded away: putting it on screen next to "upload again" is how
+      // somebody ends up paying twice. Anyone who genuinely has not paid can
+      // still open it.
+      root.append(el('details', { class: 'card card--flat' },
+        el('summary', { class: 'card__title' }, 'I have not actually paid yet'),
+        el('p', { class: 'muted' },
+          'Only if the note above says the payment never arrived. If it was just '
+          + 'a blurry screenshot, do not pay again — send a clearer one.'),
+        qrCard(order, payment, { showTimer: false })
+      ));
+
+      root.append(uploader(order, (updated) => {
+        toast('Sent for verification 🎉', 'ok');
+        paint(updated, payment);
+      }));
     } else {
       root.append(waitingCard(order, paint), receipt(order));
     }
