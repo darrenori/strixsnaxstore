@@ -15,6 +15,9 @@ import http from 'node:http';
 // --- the stub Bot API, up before the app reads its config -------------------
 const sent = [];
 
+/** Methods the stub should reject, so failure paths can be exercised. */
+const failing = new Set();
+
 const telegram = http.createServer((req, res) => {
   const chunks = [];
   req.on('data', (c) => chunks.push(c));
@@ -23,6 +26,17 @@ const telegram = http.createServer((req, res) => {
     let payload = {};
     try { payload = JSON.parse(Buffer.concat(chunks).toString() || '{}'); } catch { /* form post */ }
     sent.push({ method, payload });
+
+    if (failing.has(method)) {
+      res.writeHead(429, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        ok: false,
+        error_code: 429,
+        description: 'Too Many Requests: retry after 448',
+        parameters: { retry_after: 448 },
+      }));
+      return;
+    }
 
     // Enough of a reply for Telegraf to consider each call a success.
     const result = {
@@ -234,6 +248,34 @@ console.log('\n— the deployment can point Telegram at itself —');
   const statusBody = await status.json();
   check('status reports the bot identity', statusBody.bot?.username === 'snaxstore_bot',
     JSON.stringify(statusBody).slice(0, 120));
+}
+
+// ---------------------------------------------------------------------------
+console.log('\n— a rate-limited command list must not leave the bot deaf —');
+// Telegram rate-limits setMyCommands hard, and a few restarts in a row is
+// enough to earn a several-minute cooldown. The command list is cosmetic; the
+// webhook is the whole ballgame, so one must not be able to block the other.
+{
+  failing.add('setMyCommands');
+  const before = sent.length;
+
+  const res = await fetch(
+    `${base}/api/admin/telegram/setup?key=bot-migrate-secret&url=https://snax.example.com`,
+    { method: 'POST' }
+  );
+  const body = await res.json();
+  failing.delete('setMyCommands');
+
+  check('setup still succeeds', res.status === 200, JSON.stringify(body).slice(0, 140));
+  check('the webhook was still registered', body.configured?.webhook === true);
+  check('the command list is reported as skipped', body.configured?.commands === false);
+  check('and the reason is passed back, not swallowed',
+    (body.configured?.skipped ?? []).some((s) => /429|Too Many Requests/.test(s)),
+    JSON.stringify(body.configured?.skipped));
+
+  const calls = sent.slice(before).map((c) => c.method);
+  check('setWebhook was reached despite the earlier failure', calls.includes('setWebhook'),
+    calls.join(','));
 }
 
 console.log(`\n${fail ? 'FAILED' : 'PASSED'}: ${pass} passed, ${fail} failed\n`);

@@ -221,9 +221,20 @@ export async function configureTelegram({
 } = {}) {
   const instance = createBot();
   const done = { commands: false, menuButton: false, webhook: false };
+  const skipped = [];
 
-  await instance.telegram.setMyCommands(BOT_COMMANDS);
-  done.commands = true;
+  // Best effort, deliberately. Telegram rate-limits setMyCommands hard — a few
+  // restarts in a row is enough to earn a several-minute cooldown — and the
+  // command list is cosmetic. Letting a 429 here abort the run would leave the
+  // webhook unregistered, which is the one thing that decides whether the bot
+  // answers at all.
+  try {
+    await instance.telegram.setMyCommands(BOT_COMMANDS);
+    done.commands = true;
+  } catch (err) {
+    skipped.push(`commands: ${err.message}`);
+    log.warn('Could not set the command list', { error: err.message });
+  }
 
   // A chat-menu button makes the store reachable from the ☰ next to the input
   // box. Telegram only accepts https here, so local development skips it.
@@ -234,10 +245,13 @@ export async function configureTelegram({
       });
       done.menuButton = true;
     } catch (err) {
+      skipped.push(`menuButton: ${err.message}`);
       log.warn('Could not set chat menu button', { error: err.message });
     }
   }
 
+  // This one is allowed to throw. Without it the bot is deaf, so a caller must
+  // hear about a failure rather than read a cheerful summary.
   if (webhookUrl) {
     await instance.telegram.setWebhook(webhookUrl, {
       secret_token: config.telegram.webhookSecret || undefined,
@@ -247,7 +261,7 @@ export async function configureTelegram({
     log.info('Telegram webhook registered', { url: webhookUrl });
   }
 
-  return done;
+  return skipped.length ? { ...done, skipped } : done;
 }
 
 export async function launchBot() {
