@@ -11,3 +11,4 @@ tmp/
 uploads/
 service-account.json
 google-credentials.json
+.vercel
