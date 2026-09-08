@@ -279,6 +279,127 @@ export async function setBlocked({ admin, targetTelegramId, isBlocked }) {
 // Sheets
 // ---------------------------------------------------------------------------
 
+/**
+ * Pull edits made in the spreadsheet back into the database.
+ *
+ * The sheet is normally a mirror — syncCatalogToSheets() overwrites it — but
+ * the committee edits it anyway, because correcting a price in a spreadsheet
+ * on the shelf is faster than opening the admin panel. This is that edit
+ * finding its way home.
+ *
+ * Matching is by SKU, which is the only column here that is a real identity.
+ * A row whose SKU is unknown is reported, never inserted: creating an item
+ * needs a category and a considered price, and guessing either from a
+ * half-typed row is how a shop ends up selling something for nothing.
+ * Likewise a deleted row archives nothing — order history points at items,
+ * and rows go missing because somebody sorted the sheet, not because they
+ * meant to withdraw a product.
+ *
+ * Stock does not take the direct route. It moves through set_stock so the
+ * ledger records who changed it and to what, exactly as a stock-take does.
+ */
+export async function importCatalogFromSheets({ admin }) {
+  if (!sheets.sheetsEnabled()) {
+    throw new AdminError('Google Sheets is not configured.', 'SHEETS_DISABLED', 400);
+  }
+
+  let rows;
+  try {
+    rows = await sheets.readCatalogTab();
+  } catch (err) {
+    throw new AdminError(`Could not read the sheet: ${err.message}`, 'SHEET_READ_FAILED', 502);
+  }
+  if (!rows) throw new AdminError('Google Sheets is not configured.', 'SHEETS_DISABLED', 400);
+
+  const current = await getCatalogForSheets();
+  const bySku = new Map(current.map((i) => [i.sku, i]));
+
+  const changed = [];
+  const stocked = [];
+  const skipped = [];
+  let unchanged = 0;
+
+  for (const row of rows) {
+    if (row.problems.length) {
+      skipped.push({ sku: row.sku, row: row.row, reason: row.problems.join('; ') });
+      continue;
+    }
+
+    const item = bySku.get(row.sku);
+    if (!item) {
+      skipped.push({ sku: row.sku, row: row.row, reason: 'no item with that SKU' });
+      continue;
+    }
+
+    // --- everything except stock ------------------------------------------
+    const blank = (v) => (v === '' || v === undefined ? null : v);
+    const same = (a, b) => blank(a) === blank(b);
+    const patch = {};
+    if (!same(row.name, item.name)) patch.name = row.name;
+    if (!same(row.variant, item.variant)) patch.variant = row.variant;
+    if (!same(row.description, item.description)) patch.description = row.description;
+    if (row.priceCents !== item.price_cents) patch.price_cents = row.priceCents;
+    if (row.lowStockAt !== null && row.lowStockAt !== item.low_stock_at) {
+      patch.low_stock_at = row.lowStockAt;
+    }
+    if (row.isActive !== item.is_active) patch.is_active = row.isActive;
+    if (row.isSpecial !== item.is_special) patch.is_special = row.isSpecial;
+
+    const fields = Object.keys(patch);
+    if (fields.length) {
+      const values = Object.values(patch);
+      const sets = fields.map((f, i) => `${f} = $${i + 1}`);
+      values.push(item.id);
+      try {
+        await one(
+          `update items set ${sets.join(', ')} where id = $${values.length} returning id`,
+          values
+        );
+        changed.push({ sku: row.sku, fields });
+      } catch (err) {
+        skipped.push({ sku: row.sku, row: row.row, reason: err.message });
+        continue;
+      }
+    }
+
+    // --- stock, through the ledger ----------------------------------------
+    if (row.stock !== null && row.stock !== item.stock) {
+      try {
+        await setStock({
+          itemId: item.id,
+          admin,
+          count: row.stock,
+          note: `Sheet edit (row ${row.row})`,
+        });
+        stocked.push({ sku: row.sku, from: item.stock, to: row.stock });
+      } catch (err) {
+        skipped.push({ sku: row.sku, row: row.row, reason: err.message });
+      }
+    }
+
+    if (!fields.length && (row.stock === null || row.stock === item.stock)) unchanged += 1;
+  }
+
+  // One push at the end, not one per row: it restates the derived columns
+  // (Available, Low?, Updated At) that the edits have just invalidated.
+  await syncCatalogToSheets();
+
+  log.info('Catalogue imported from sheet', {
+    changed: changed.length, stocked: stocked.length, skipped: skipped.length,
+    admin: admin?.telegram_id,
+  });
+
+  return {
+    read: rows.length,
+    updated: changed.length,
+    stockChanged: stocked.length,
+    unchanged,
+    skipped,
+    changes: changed,
+    stockChanges: stocked,
+  };
+}
+
 export async function syncCatalogToSheets() {
   if (!sheets.sheetsEnabled()) return false;
   try {
@@ -292,5 +413,5 @@ export async function syncCatalogToSheets() {
 export default {
   setStock, adjustStock, bulkSetStock, listStockMovements,
   createItem, updateItem, archiveItem, createCategory,
-  listUsers, setAdmin, setBlocked, syncCatalogToSheets, AdminError,
+  listUsers, setAdmin, setBlocked, syncCatalogToSheets, importCatalogFromSheets, AdminError,
 };

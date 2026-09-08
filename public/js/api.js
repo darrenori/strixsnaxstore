@@ -83,6 +83,7 @@ export const api = {
   setBlocked:    (telegramId, isBlocked) => request('/admin/users/block', { method: 'POST', body: { telegramId, isBlocked } }),
   settings:      (payload) => request('/admin/settings', { method: 'POST', body: payload }),
   syncSheets:    () => request('/admin/sheets/sync', { method: 'POST' }),
+  importSheets:  () => request('/admin/sheets/import', { method: 'POST' }),
 };
 
 export default api;

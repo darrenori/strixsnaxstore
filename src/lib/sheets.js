@@ -314,6 +314,86 @@ export async function syncCatalog(rows) {
   }
 }
 
+/**
+ * Read the "Items & Stock" tab back.
+ *
+ * The sheet is a mirror, but the committee edits it — a price gets corrected
+ * on a phone in the pantry long before anyone opens the admin panel. This is
+ * the return leg: whatever a human typed, parsed into the shape the importer
+ * expects. Derived columns (Reserved, Available, Low?, Updated At) are read
+ * past, because writing them back would just be an echo.
+ *
+ * Anything unparseable is reported rather than guessed at — a price cell
+ * holding "1.20 (was 1.50)" must not silently become $1.20.
+ */
+export async function readCatalogTab() {
+  const api = await client();
+  if (!api) return null;
+
+  const res = await api.spreadsheets.values.get({
+    spreadsheetId: config.sheets.spreadsheetId,
+    range: `${TABS.catalog.title}!A2:P`,
+  });
+
+  const rows = res.data.values ?? [];
+  const out = [];
+
+  rows.forEach((row, i) => {
+    const sku = String(row[0] ?? '').trim();
+    if (!sku) return;                       // blank spacer row — not an error
+
+    const problems = [];
+    const cell = (n) => String(row[n] ?? '').trim();
+
+    const name = cell(4);
+    if (!name) problems.push('the Name cell is empty');
+
+    // "$1.20", "1.20", "1,20" — a person typed it, so be forgiving about the
+    // decoration but strict about the result.
+    const rawPrice = cell(7).replace(/[$\s]/g, '').replace(',', '.');
+    const price = Number(rawPrice);
+    if (rawPrice === '' || !Number.isFinite(price) || price < 0) {
+      problems.push(`"${cell(7)}" is not a price`);
+    }
+
+    const int = (raw, label) => {
+      if (raw === '') return null;
+      const n = Number(raw);
+      if (!Number.isInteger(n) || n < 0) { problems.push(`"${raw}" is not a ${label}`); return null; }
+      return n;
+    };
+    const stock = int(cell(8), 'stock count');
+    const lowStockAt = int(cell(11), 'low-stock threshold');
+
+    // syncCatalog writes Yes/No and Yes/blank; accept the obvious variants a
+    // person might type over them.
+    const flag = (raw, fallback) => {
+      const v = raw.toLowerCase();
+      if (['yes', 'y', 'true', '1', 'x'].includes(v)) return true;
+      if (['no', 'n', 'false', '0'].includes(v)) return false;
+      if (v === '') return fallback;
+      problems.push(`"${raw}" is not a yes/no`);
+      return fallback;
+    };
+
+    out.push({
+      row: i + 2,                           // 1-based, past the header
+      sku,
+      name,
+      variant: cell(5) || null,
+      description: cell(6) || null,
+      priceCents: Math.round(price * 100),
+      stock,
+      lowStockAt,
+      isActive: flag(cell(13), true),
+      isSpecial: flag(cell(14), false),
+      problems,
+    });
+  });
+
+  return out;
+}
+
 /** Append one stock-take / restock movement to the ledger tab. */
 export async function recordStockMovement(movement) {
   if (!credentialsPresent()) return false;
@@ -338,5 +418,5 @@ export async function recordStockMovement(movement) {
 
 export default {
   sheetsEnabled, ensureTabs, recordOrder, updateOrderStatus,
-  syncCatalog, recordStockMovement, sgt, TABS,
+  syncCatalog, readCatalogTab, recordStockMovement, sgt, TABS,
 };

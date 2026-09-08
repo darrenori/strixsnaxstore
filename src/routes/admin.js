@@ -316,4 +316,14 @@ router.post('/admin/sheets/sync', async (req, res, next) => {
   } catch (err) { return next(err); }
 });
 
+/** The other direction — take what was typed in the sheet and apply it. */
+router.post('/admin/sheets/import', async (req, res, next) => {
+  try {
+    if (!sheetsEnabled()) {
+      return res.status(400).json({ error: 'Google Sheets is not configured on the server.' });
+    }
+    return res.json(await admin.importCatalogFromSheets({ admin: req.user }));
+  } catch (err) { return next(err); }
+});
+
 export default router;

@@ -36,6 +36,12 @@ screenshot, and every confirmed sale written into Google Sheets.
 - Every verified order is appended to Google Sheets: an `Orders` row, one
   `Order Items` row per line, plus live `Items & Stock` and `Stock Movements`
   tabs.
+- The sheet edits back. Change a price, name, stock count or the Active flag
+  in *Items & Stock*, press **SYNC FROM SHEET** in the admin tab, and it lands
+  in the catalogue — stock through the ledger, like any stock-take. Rows are
+  matched on SKU; an unknown SKU or an unreadable cell is reported rather than
+  guessed at, and never inserted or deleted. **PUSH MENU TO SHEET** goes the
+  other way and overwrites the sheet, so sync before you push.
 
 ---
 
