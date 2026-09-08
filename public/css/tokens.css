@@ -16,6 +16,10 @@
   --red-ink:      #a92318;
 
   --navy:         #23395b;
+  /* Navy reads as a heading on cream, but as text it has to invert in dark
+     mode. Backgrounds and borders keep using --navy; anything that is ink on
+     a surface uses this. */
+  --heading:      #23395b;
   --navy-deep:    #1a2b47;
 
   --blue:         #2f6db5;
@@ -85,6 +89,7 @@
   --border:       rgba(246, 236, 210, .14);
   --border-strong: rgba(246, 236, 210, .3);
   --navy:         #35507c;
+  --heading:      #a8c5f0;
   --shadow-block: 0 3px 0 rgba(0, 0, 0, .5);
   --shadow-card:  0 2px 10px rgba(0, 0, 0, .4);
 }

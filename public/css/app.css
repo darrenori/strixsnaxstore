@@ -48,7 +48,7 @@ img { max-width: 100%; display: block; }
 .splash__msg {
   font-family: var(--font-menu);
   font-weight: 700;
-  color: var(--navy);
+  color: var(--heading);
   margin: 0;
   letter-spacing: .01em;
 }
@@ -122,7 +122,7 @@ img { max-width: 100%; display: block; }
 .topbar__back {
   font-size: 30px;
   line-height: 1;
-  color: var(--navy);
+  color: var(--heading);
   font-weight: 700;
   padding: 0 0 4px;
 }
@@ -137,7 +137,7 @@ img { max-width: 100%; display: block; }
 .topbar__script {
   font-family: var(--font-script);
   font-size: 12px;
-  color: var(--navy);
+  color: var(--heading);
   line-height: 1.2;
 }
 .topbar__cart {
@@ -261,7 +261,7 @@ img { max-width: 100%; display: block; }
 .hero__point {
   font-family: var(--font-script);
   font-size: 14px;
-  color: var(--navy);
+  color: var(--heading);
   background: var(--paper);
   border: 2px solid var(--navy);
   border-radius: var(--r-pill);
@@ -272,7 +272,7 @@ img { max-width: 100%; display: block; }
   margin: 0;
   font-size: 12.5px;
   font-weight: 700;
-  color: var(--navy);
+  color: var(--heading);
   max-width: 34ch;
 }
 .hero.is-closed { filter: saturate(.35); }
@@ -311,7 +311,7 @@ img { max-width: 100%; display: block; }
   font-family: var(--font-display);
   font-size: 12.5px;
   letter-spacing: .05em;
-  color: var(--navy);
+  color: var(--heading);
   transition: background .16s ease, color .16s ease;
 }
 .switch__btn.is-active { background: var(--red); color: var(--cream); box-shadow: 0 2px 0 var(--red-ink); }
@@ -332,7 +332,7 @@ img { max-width: 100%; display: block; }
   color: var(--blue);
 }
 .section--red   .section__head { color: var(--red); }
-.section--navy  .section__head { color: var(--navy); }
+.section--navy  .section__head { color: var(--heading); }
 .section--gold  .section__head { color: var(--gold-deep); }
 .section--sky   .section__head { color: var(--sky-deep); }
 
@@ -370,7 +370,7 @@ img { max-width: 100%; display: block; }
 .section--panel .item__desc { color: rgba(255, 255, 255, .86); }
 .section--panel .item__meta { color: rgba(255, 255, 255, .8); }
 .section--panel .qty__btn { border-color: rgba(255,255,255,.6); color: #fff; }
-.section--panel .add-btn { background: var(--cream); color: var(--navy); box-shadow: 0 2px 0 rgba(0,0,0,.22); }
+.section--panel .add-btn { background: var(--cream); color: var(--heading); box-shadow: 0 2px 0 rgba(0,0,0,.22); }
 
 /* --------------------------------------------------------------------------
    Item row
@@ -396,7 +396,7 @@ img { max-width: 100%; display: block; }
   font-weight: 800;
   font-size: 15.5px;
   letter-spacing: .01em;
-  color: var(--navy);
+  color: var(--heading);
   text-transform: uppercase;
   margin: 0;
 }
@@ -473,7 +473,7 @@ img { max-width: 100%; display: block; }
   border-radius: 50%;
   display: grid; place-items: center;
   font-size: 17px; font-weight: 800; line-height: 1;
-  color: var(--navy);
+  color: var(--heading);
 }
 .qty__btn:disabled { opacity: .35; cursor: not-allowed; }
 .qty__val {
@@ -499,7 +499,7 @@ img { max-width: 100%; display: block; }
   font-weight: 800;
   font-size: 15.5px;
   letter-spacing: .01em;
-  color: var(--navy);
+  color: var(--heading);
   text-transform: uppercase;
   margin: 0;
 }
@@ -609,7 +609,7 @@ img { max-width: 100%; display: block; }
   font-family: var(--font-display);
   font-size: 13.5px;
   letter-spacing: .05em;
-  color: var(--navy);
+  color: var(--heading);
   margin: 0 0 12px;
   text-transform: uppercase;
 }
@@ -666,7 +666,7 @@ img { max-width: 100%; display: block; }
 .btn--ok    { background: var(--ok);    box-shadow: 0 3px 0 #1f6b40; }
 .btn--ghost {
   background: transparent;
-  color: var(--navy);
+  color: var(--heading);
   border: 2px solid var(--navy);
   box-shadow: none;
 }
@@ -683,7 +683,7 @@ img { max-width: 100%; display: block; }
   padding: 12px 0;
   border-bottom: 1px solid var(--border);
 }
-.cart-line__name { font-family: var(--font-menu); font-weight: 700; font-size: 14.5px; color: var(--navy); }
+.cart-line__name { font-family: var(--font-menu); font-weight: 700; font-size: 14.5px; color: var(--heading); }
 .cart-line__sub  { font-size: 11.5px; color: var(--ink-faint); }
 .cart-line__total { font-family: var(--font-menu); font-weight: 800; color: var(--red); white-space: nowrap; }
 .cart-line__ctrl { grid-column: 2; justify-self: end; }
@@ -725,7 +725,7 @@ img { max-width: 100%; display: block; }
   border-radius: var(--r-sm);
   padding: 5px 14px;
   margin: 8px 0 14px;
-  color: var(--navy);
+  color: var(--heading);
 }
 .qr-card__img {
   width: min(260px, 74vw);
@@ -770,7 +770,7 @@ img { max-width: 100%; display: block; }
 }
 .dropzone:hover, .dropzone.is-over { border-color: var(--blue); background: var(--paper); }
 .dropzone__icon { font-size: 30px; margin-bottom: 6px; }
-.dropzone__label { font-weight: 800; font-size: 13.5px; color: var(--navy); }
+.dropzone__label { font-weight: 800; font-size: 13.5px; color: var(--heading); }
 .dropzone__hint { font-size: 11.5px; color: var(--ink-faint); margin-top: 3px; }
 .dropzone__preview { max-height: 220px; margin: 0 auto; border-radius: var(--r-sm); object-fit: contain; }
 
@@ -818,7 +818,7 @@ img { max-width: 100%; display: block; }
   font-family: var(--font-menu);
   font-weight: 800;
   letter-spacing: .06em;
-  color: var(--navy);
+  color: var(--heading);
   font-size: 14.5px;
 }
 .order__when { font-size: 11px; color: var(--ink-faint); }
@@ -864,7 +864,7 @@ img { max-width: 100%; display: block; }
   border: 2px solid var(--navy);
   font-size: 12px;
   font-weight: 800;
-  color: var(--navy);
+  color: var(--heading);
   background: var(--surface);
   white-space: nowrap;
 }
@@ -896,7 +896,7 @@ img { max-width: 100%; display: block; }
   padding: 11px 0;
   border-bottom: 1px solid var(--border);
 }
-.stock-row__name { font-family: var(--font-menu); font-weight: 700; font-size: 14px; color: var(--navy); }
+.stock-row__name { font-family: var(--font-menu); font-weight: 700; font-size: 14px; color: var(--heading); }
 .stock-row__sub { font-size: 11px; color: var(--ink-faint); }
 .stock-row__ctrl { display: flex; align-items: center; gap: 6px; }
 .stock-input {
@@ -949,7 +949,7 @@ img { max-width: 100%; display: block; }
 .empty__title {
   font-family: var(--font-display);
   font-size: 15px;
-  color: var(--navy);
+  color: var(--heading);
   margin: 0 0 5px;
   letter-spacing: .03em;
 }
