@@ -112,6 +112,31 @@ for (const tab of document.querySelectorAll('.tab')) {
 // ---------------------------------------------------------------------------
 // Boot
 // ---------------------------------------------------------------------------
+
+/**
+ * Retry a request that failed for a reason the caller cannot fix.
+ *
+ * A serverless function that has been idle can fail its very first request
+ * while it wakes up, and the shopper who happens to be that first request gets
+ * a dead end. Retrying turns that into a slightly slow load. A 4xx is an
+ * answer, not a hiccup, so those are handed straight back.
+ */
+async function withRetry(fn, attempts = 3) {
+  let lastError;
+  for (let i = 0; i < attempts; i += 1) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      if (err.status && err.status < 500) throw err;
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((resolve) => { setTimeout(resolve, 400 * (i + 1)); });
+    }
+  }
+  throw lastError;
+}
+
 async function boot() {
   tg.ready();
   tg.applyTheme();
@@ -120,7 +145,7 @@ async function boot() {
   subscribe(render);
 
   try {
-    const [me, catalog] = await Promise.all([api.me(), api.catalog()]);
+    const [me, catalog] = await withRetry(() => Promise.all([api.me(), api.catalog()]));
     state.me = me;
     state.catalog = catalog;
     state.store = catalog.store;
