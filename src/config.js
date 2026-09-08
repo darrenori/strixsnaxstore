@@ -90,7 +90,7 @@ export const config = {
     /** Editable amount = false means the buyer cannot change the sum in their bank app. */
     amountEditable: bool('PAYNOW_AMOUNT_EDITABLE', false),
     /** Falls back to this image when no proxy is configured. */
-    staticQrPath: optional('PAYNOW_STATIC_QR', '/assets/paynow-static.svg'),
+    staticQrPath: optional('PAYNOW_STATIC_QR', '/assets/paynow-static.png'),
   },
 
   store: {
