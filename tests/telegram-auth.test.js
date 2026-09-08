@@ -104,3 +104,67 @@ test('a signature stays valid when fields are reordered', () => {
 
   assert.equal(verifyInitData(shuffled.toString()).user.id, 12345);
 });
+
+// ---------------------------------------------------------------------------
+// The `signature` field newer clients send.
+//
+// It is an Ed25519 signature for validating without the bot token. The spec
+// excludes only `hash` from the data-check-string, but clients have shipped
+// both readings, and guessing wrong locks every shopper out of the store.
+// ---------------------------------------------------------------------------
+
+/** Sign the way the spec reads: everything but `hash` goes into the digest. */
+function signIncludingSignature(fields) {
+  return signInitData({ ...fields, signature: 'Ed25519-fake-for-test' });
+}
+
+/** Sign the other way: `signature` present, but left out of the digest. */
+function signExcludingSignature(fields) {
+  const params = new URLSearchParams({
+    user: JSON.stringify(validUser),
+    auth_date: String(Math.floor(Date.now() / 1000)),
+    ...fields,
+  });
+  const pairs = [...params.entries()].map(([k, v]) => `${k}=${v}`).sort();
+  const secret = crypto.createHmac('sha256', 'WebAppData').update(BOT_TOKEN).digest();
+  const hash = crypto.createHmac('sha256', secret).update(pairs.join('\n')).digest('hex');
+  params.set('signature', 'Ed25519-fake-for-test');
+  params.set('hash', hash);
+  return params.toString();
+}
+
+test('accepts init data whose digest covers the signature field', () => {
+  const result = verifyInitData(signIncludingSignature({
+    user: JSON.stringify(validUser),
+    auth_date: String(Math.floor(Date.now() / 1000)),
+  }));
+  assert.equal(result.user.id, validUser.id);
+  assert.equal(result.signatureExcluded, false);
+});
+
+test('also accepts init data whose digest leaves the signature field out', () => {
+  const result = verifyInitData(signExcludingSignature({}));
+  assert.equal(result.user.id, validUser.id);
+  assert.equal(result.signatureExcluded, true, 'should report which reading matched');
+});
+
+test('a signature field does not let a tampered user through', () => {
+  const signed = signExcludingSignature({});
+  const tampered = new URLSearchParams(signed);
+  tampered.set('user', JSON.stringify({ ...validUser, id: 99999 }));
+  assert.throws(() => verifyInitData(tampered.toString()), /does not match/);
+});
+
+test('a rejected signature reports which fields arrived, for diagnosis', () => {
+  const signed = freshInitData();
+  const tampered = new URLSearchParams(signed);
+  tampered.set('user', JSON.stringify({ ...validUser, id: 5 }));
+  try {
+    verifyInitData(tampered.toString());
+    assert.fail('should have thrown');
+  } catch (err) {
+    assert.match(err.detail, /auth_date/);
+    assert.match(err.detail, /user/);
+    assert.doesNotMatch(err.detail, /Darren/, 'field names only, never values');
+  }
+});

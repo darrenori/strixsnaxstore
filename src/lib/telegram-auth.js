@@ -48,25 +48,43 @@ export function verifyInitData(initData, { maxAgeSeconds = config.telegram.initD
   const hash = params.get('hash');
   if (!hash) throw new InitDataError('Init data has no hash');
 
-  // Everything except `hash`, sorted, as k=v lines.
-  const pairs = [];
-  for (const [key, value] of params.entries()) {
-    if (key === 'hash') continue;
-    pairs.push(`${key}=${value}`);
+  /** Everything except `hash`, sorted, as k=v lines. */
+  function digestOf({ excludeSignature }) {
+    const pairs = [];
+    for (const [key, value] of params.entries()) {
+      if (key === 'hash') continue;
+      if (excludeSignature && key === 'signature') continue;
+      pairs.push(`${key}=${value}`);
+    }
+    pairs.sort();
+    return crypto.createHmac('sha256', SECRET_KEY).update(pairs.join('\n')).digest('hex');
   }
-  pairs.sort();
-  const dataCheckString = pairs.join('\n');
 
-  const expected = crypto
-    .createHmac('sha256', SECRET_KEY)
-    .update(dataCheckString)
-    .digest('hex');
+  const received = Buffer.from(hash, 'hex');
 
-  // Constant-time compare so we do not leak the hash a byte at a time.
-  const a = Buffer.from(expected, 'hex');
-  const b = Buffer.from(hash, 'hex');
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
-    throw new InitDataError('Init data signature does not match');
+  /** Constant-time compare, so we do not leak the hash a byte at a time. */
+  const matches = (hex) => {
+    const expected = Buffer.from(hex, 'hex');
+    return expected.length === received.length && crypto.timingSafeEqual(expected, received);
+  };
+
+  // Newer clients also send `signature`, an Ed25519 signature meant for
+  // validating without the bot token. The spec excludes only `hash` from the
+  // data-check-string, so that is tried first — but clients have shipped both
+  // readings, and being wrong here locks every shopper out of the store.
+  // Accepting either is safe: whichever fields went into the digest, forging it
+  // still needs the bot token, and `signature` carries its own proof anyway.
+  let signatureExcluded = false;
+  if (!matches(digestOf({ excludeSignature: false }))) {
+    if (params.has('signature') && matches(digestOf({ excludeSignature: true }))) {
+      signatureExcluded = true;
+    } else {
+      // The field names alone say whether this was a stale session or a shape
+      // we do not handle. No values, so nothing sensitive reaches a log.
+      const err = new InitDataError('Init data signature does not match');
+      err.detail = [...params.keys()].sort().join(',');
+      throw err;
+    }
   }
 
   // A correct signature is forever valid, so freshness has to be checked too —
@@ -112,6 +130,8 @@ export function verifyInitData(initData, { maxAgeSeconds = config.telegram.initD
     chatType: params.get('chat_type') ?? null,
     authDate,
     ageSeconds,
+    /** True when the digest only matched with `signature` left out. */
+    signatureExcluded,
   };
 }
 

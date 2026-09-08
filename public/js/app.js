@@ -184,8 +184,17 @@ async function refreshAdminBadge() {
   } catch { /* the admin tab will surface any real problem */ }
 }
 
+/**
+ * A signature failure almost always means the session Telegram handed this
+ * page is stale — the bot token changed, or the app was reopened from a very
+ * old message. Reopening mints a fresh one, so say that rather than showing
+ * the shopper a cryptographic detail they cannot act on.
+ */
+const STALE_SESSION = new Set(['INVALID_INIT_DATA', 'INIT_DATA_EXPIRED', 'MISSING_INIT_DATA']);
+
 function showBootError(err) {
   const outsideTelegram = !tg.inTelegram;
+  const stale = STALE_SESSION.has(err.code);
   splash.replaceChildren(
     el('div', { class: 'badge badge--lg' },
       el('span', { class: 'badge__ay' }, 'AY2026/2027'),
@@ -193,16 +202,31 @@ function showBootError(err) {
       el('span', { class: 'badge__script' }, 'Snax Store')
     ),
     el('div', { class: 'card', style: 'max-width:340px;margin-top:22px;' },
-      el('h2', { class: 'card__title' }, outsideTelegram ? 'Open me in Telegram' : 'Could not start'),
+      el('h2', { class: 'card__title' },
+        // eslint-disable-next-line no-nested-ternary
+        outsideTelegram ? 'Open me in Telegram' : stale ? 'Session expired' : 'Could not start'),
       el('p', { class: 'muted' },
+        // eslint-disable-next-line no-nested-ternary
         outsideTelegram
           ? 'This store runs inside Telegram so it can verify who you are. Search for the STRIX Snax Store bot and press Start.'
-          : err.message),
-      !outsideTelegram
+          : stale
+            ? 'Close this window and open the store again from the bot — reloading here will not fix it, because the sign-in came with the window.'
+            : err.message),
+      // Reloading re-runs the page with the same stale session, so it would
+      // just fail again. Only offer it when a retry can actually work.
+      !outsideTelegram && !stale
         ? el('button', {
             class: 'btn mt', type: 'button',
             onClick: () => window.location.reload(),
           }, 'TRY AGAIN')
+        : null,
+      // Telegram's SDK also loads in a plain browser, where close() does
+      // nothing, so this is only worth offering inside the app itself.
+      stale && !outsideTelegram && tg.tg?.close
+        ? el('button', {
+            class: 'btn mt', type: 'button',
+            onClick: () => tg.tg.close(),
+          }, 'CLOSE')
         : null
     )
   );

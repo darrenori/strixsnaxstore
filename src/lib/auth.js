@@ -46,6 +46,13 @@ export async function requireTelegramUser(req, res, next) {
       req.query?.initData;
 
     const verified = verifyInitData(initData);
+    if (verified.signatureExcluded) {
+      // Worth knowing: it means this client's initData only validates with
+      // `signature` left out of the digest.
+      log.warn('Init data validated without its signature field', {
+        telegramId: verified.user.id,
+      });
+    }
     const user = await upsertUser(verified.user);
 
     if (user.is_blocked) {
@@ -57,7 +64,7 @@ export async function requireTelegramUser(req, res, next) {
     return next();
   } catch (err) {
     if (err instanceof InitDataError) {
-      log.warn('Rejected init data', { code: err.code, ip: req.ip });
+      log.warn('Rejected init data', { code: err.code, ip: req.ip, fields: err.detail });
       return res.status(err.status).json({ error: err.message, code: err.code });
     }
     return next(err);
