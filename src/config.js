@@ -53,6 +53,12 @@ export const config = {
 
   telegram: {
     botToken: required('TELEGRAM_BOT_TOKEN'),
+    /**
+     * Where the Bot API lives. Overridable so the bot can be pointed at a
+     * self-hosted Bot API server — and so tests can drive the real handlers
+     * against a stub instead of messaging actual people.
+     */
+    apiRoot: optional('TELEGRAM_API_ROOT', 'https://api.telegram.org'),
     // Long polling by default; set a webhook URL in production if you prefer.
     webhookUrl: optional('TELEGRAM_WEBHOOK_URL'),
     webhookSecret: optional('TELEGRAM_WEBHOOK_SECRET'),

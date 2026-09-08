@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { Readable } from 'node:stream';
 import multer from 'multer';
 import { z } from 'zod';
 import * as orders from '../services/order.service.js';
@@ -38,6 +39,27 @@ const upload = multer({
     return cb(null, true);
   },
 });
+
+/**
+ * Replay a request body a serverless runtime already read.
+ *
+ * Vercel and friends buffer the whole body before the handler runs. For JSON
+ * that is a convenience; for a file upload it is fatal — multer waits on a
+ * stream that has already ended and the request hangs until the function
+ * times out. The bytes are still there in req.body, so hand multer a stream
+ * that replays them. On an ordinary server nothing parses multipart bodies,
+ * so req.body is undefined here and this does nothing at all.
+ */
+function replayBufferedUpload(req, _res, next) {
+  if (!Buffer.isBuffer(req.body) || req.body.length === 0) return next();
+
+  const replay = Readable.from([req.body]);
+  req.pipe = replay.pipe.bind(replay);
+  req.unpipe = replay.unpipe.bind(replay);
+  delete req.body;
+  req._body = false;
+  return next();
+}
 
 /**
  * A declared mime type is just a string the client chose. Check the magic
@@ -100,7 +122,7 @@ router.post('/orders/:id/cancel', async (req, res, next) => {
 });
 
 /** Upload the PayNow screenshot and join the review queue. */
-router.post('/orders/:id/proof', upload.single('proof'), async (req, res, next) => {
+router.post('/orders/:id/proof', replayBufferedUpload, upload.single('proof'), async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Attach your payment screenshot.' });
 

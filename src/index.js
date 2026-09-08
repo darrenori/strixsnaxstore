@@ -11,6 +11,7 @@ import catalogRoutes from './routes/catalog.js';
 import orderRoutes from './routes/orders.js';
 import adminRoutes from './routes/admin.js';
 import migrateRoutes from './routes/migrate.js';
+import telegramSetupRoutes from './routes/telegram-setup.js';
 import { launchBot, getBot } from './bot/index.js';
 import { expireStaleOrders, pruneOldProofs } from './services/order.service.js';
 import { ensureTabs, sheetsEnabled } from './lib/sheets.js';
@@ -104,15 +105,18 @@ app.post('/telegram/webhook', async (req, res) => {
     return res.sendStatus(401);
   }
 
-  // Answer Telegram first: it retries on anything slow, which would duplicate
-  // work. The update is then handled on the same invocation.
-  res.sendStatus(200);
+  // Handle the update before answering. A serverless invocation can be frozen
+  // the moment its response is sent, which would cut the bot off mid-reply —
+  // the buyer presses /start and nothing ever arrives. Telegram allows up to
+  // 60s, and this work is one query plus one sendMessage.
   try {
     await getBot().handleUpdate(req.body);
   } catch (err) {
+    // Always answer 200 even so: any other status makes Telegram redeliver
+    // the same update forever.
     log.error('Webhook update failed', { error: err.message });
   }
-  return undefined;
+  return res.sendStatus(200);
 });
 
 /**
@@ -164,6 +168,9 @@ api.use(apiLimiter);
 // Bootstrap the database before anything can authenticate: there is no admin
 // to check against until the tables exist. Its own shared secret is the gate.
 api.use(migrateRoutes);
+// Same reasoning for pointing Telegram at this deployment: it has to happen
+// before anyone can be an authenticated admin.
+api.use(telegramSetupRoutes);
 
 api.use(requireTelegramUser);
 api.use(catalogRoutes);

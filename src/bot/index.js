@@ -46,7 +46,9 @@ function storeKeyboard() {
 
 export function createBot() {
   if (bot) return bot;
-  bot = new Telegraf(config.telegram.botToken);
+  bot = new Telegraf(config.telegram.botToken, {
+    telegram: { apiRoot: config.telegram.apiRoot },
+  });
 
   // Every update refreshes the user row, so /start is all it takes to become
   // a known user an admin can later promote.
@@ -194,33 +196,69 @@ export function createBot() {
   return bot;
 }
 
-export async function launchBot() {
+/** The command list Telegram shows in the ☰ menu next to the input box. */
+export const BOT_COMMANDS = [
+  { command: 'start',  description: 'Open the Snax Store' },
+  { command: 'menu',   description: "Today's menu and prices" },
+  { command: 'orders', description: 'Your recent orders' },
+  { command: 'id',     description: 'Show your Telegram id' },
+  { command: 'admin',  description: 'Admin summary' },
+];
+
+/**
+ * Tell Telegram about this deployment: the command list, the ☰ menu button
+ * and, when a webhook URL is given, where to deliver updates.
+ *
+ * On a long-running host launchBot() does this at boot. A serverless
+ * deployment never boots, so the same work is reachable over HTTP — see
+ * src/routes/telegram-setup.js. Keeping it in one function means the two
+ * paths cannot drift apart.
+ */
+export async function configureTelegram({
+  publicUrl = config.publicUrl,
+  webhookUrl = null,
+  dropPendingUpdates = true,
+} = {}) {
   const instance = createBot();
+  const done = { commands: false, menuButton: false, webhook: false };
 
-  await instance.telegram.setMyCommands([
-    { command: 'start',  description: 'Open the Snax Store' },
-    { command: 'menu',   description: "Today's menu and prices" },
-    { command: 'orders', description: 'Your recent orders' },
-    { command: 'id',     description: 'Show your Telegram id' },
-    { command: 'admin',  description: 'Admin summary' },
-  ]);
+  await instance.telegram.setMyCommands(BOT_COMMANDS);
+  done.commands = true;
 
-  // A chat-menu button makes the store reachable from the ☰ next to the input box.
-  if (config.publicUrl.startsWith('https://')) {
+  // A chat-menu button makes the store reachable from the ☰ next to the input
+  // box. Telegram only accepts https here, so local development skips it.
+  if (publicUrl && publicUrl.startsWith('https://')) {
     try {
       await instance.telegram.setChatMenuButton({
-        menuButton: { type: 'web_app', text: 'Snax Store', web_app: { url: config.publicUrl } },
+        menuButton: { type: 'web_app', text: 'Snax Store', web_app: { url: publicUrl } },
       });
+      done.menuButton = true;
     } catch (err) {
       log.warn('Could not set chat menu button', { error: err.message });
     }
   }
 
-  if (config.telegram.useWebhook && config.telegram.webhookUrl) {
-    await instance.telegram.setWebhook(config.telegram.webhookUrl, {
+  if (webhookUrl) {
+    await instance.telegram.setWebhook(webhookUrl, {
       secret_token: config.telegram.webhookSecret || undefined,
-      drop_pending_updates: true,
+      drop_pending_updates: dropPendingUpdates,
     });
+    done.webhook = true;
+    log.info('Telegram webhook registered', { url: webhookUrl });
+  }
+
+  return done;
+}
+
+export async function launchBot() {
+  const instance = createBot();
+  const useWebhook = config.telegram.useWebhook && config.telegram.webhookUrl;
+
+  await configureTelegram({
+    webhookUrl: useWebhook ? config.telegram.webhookUrl : null,
+  });
+
+  if (useWebhook) {
     log.info('Bot running via webhook', { url: config.telegram.webhookUrl });
   } else {
     // Fire and forget — launch() only resolves when polling stops.
@@ -232,4 +270,4 @@ export async function launchBot() {
   return instance;
 }
 
-export default { createBot, launchBot, getBot };
+export default { createBot, launchBot, getBot, configureTelegram, BOT_COMMANDS };
