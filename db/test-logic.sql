@@ -3,7 +3,7 @@
 --
 -- Run against a scratch database that already has schema.sql + seed.sql:
 --
---   psql -d strix -v ON_ERROR_STOP=1 -f supabase/test-logic.sql
+--   npm run test:local -- sql       (no database needed)
 --
 -- Everything happens inside a transaction that is rolled back at the end, so
 -- it is safe to point at a copy of production data. It is NOT safe to run on

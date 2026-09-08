@@ -187,6 +187,30 @@ CRON_SECRET=<another long random string>
 the store advertises itself as open 24/7. Serverless does not have this
 problem, which is why the Vercel path exists.
 
+### Pointing Telegram at a serverless deployment
+
+A long-running server registers itself with Telegram at boot. A serverless
+deployment never boots — nothing runs until a request arrives, and the first
+request can only arrive once Telegram already knows where to send it. Break
+the loop by calling the setup endpoint once after deploying:
+
+```powershell
+Invoke-RestMethod -Method Post `
+  "https://<your-app>.vercel.app/api/admin/telegram/setup?key=$env:MIGRATE_SECRET"
+```
+
+That registers the webhook (with its secret token), the command list and the
+☰ menu button, then reports back what Telegram now thinks. It reads the
+origin from the URL you called, so there is nothing to type twice. To check
+later without changing anything:
+
+```powershell
+Invoke-RestMethod "https://<your-app>.vercel.app/api/admin/telegram/status?key=$env:MIGRATE_SECRET"
+```
+
+A `url` field of `""` in the reply means no webhook is registered and the bot
+is deaf — run the setup call.
+
 A `Dockerfile` is also here for anywhere that takes a container.
 
 ---
@@ -253,10 +277,25 @@ the umbrella `googleapis` package, which bundles every Google API and costs
 ## Tests
 
 ```bash
-npm test        # 28 unit tests: signature forgery, PayNow payloads, HTTP auth
-npm run check   # parse every file, then run the tests
-npm run test:e2e   # 28 more against a live database (see below)
+npm test          # 28 unit tests: signature forgery, PayNow payloads, HTTP auth
+npm run test:local  # 148 integration checks against a throwaway Postgres
+npm run check     # parse every file, then run all of the above
 ```
+
+`test:local` needs no database, no Docker and no network. It starts PGlite —
+Postgres compiled to WASM, so the same plpgsql and the same row locks — applies
+`schema.sql` and `seed.sql`, and runs each suite against its own fresh copy:
+
+| Suite | Checks | Covers |
+|-------|--------|--------|
+| `sql` | 23 | the money and stock rules asserted directly against the plpgsql functions |
+| `e2e` | 28 | the happy path: catalogue, pricing, proof upload, approval, stock |
+| `flows` | 57 | what happens when it goes wrong — rejection, cancellation, expiry, races, every guard |
+| `bot` | 30 | the real Telegram handlers driven through the webhook, against a stub Bot API |
+| `vercel` | 10 | the serverless request shape, including a screenshot upload on a pre-read body |
+
+Run one at a time with `npm run test:local -- flows`. To run against a real
+database instead, set `DATABASE_URL` and use `npm run test:e2e`.
 
 The money and stock rules live in SQL, so they are tested in SQL. Against a
 scratch database that has `schema.sql` and `seed.sql` applied:
