@@ -406,6 +406,60 @@ begin
 end $$;
 
 -- ============================================================================
+-- rehold_order_stock — a rejected order is being re-submitted.
+--
+-- release_order put this order's stock back on the shelf when it was rejected,
+-- so the buyer's second screenshot has to take it off again. Without this the
+-- order sits in the review queue holding nothing, and approving it deducts
+-- stock that was meanwhile sold to somebody else.
+--
+-- Availability is re-checked under the same row lock create_order uses, so a
+-- re-submission behaves exactly like a fresh order and fails the same way when
+-- the shelf has emptied in the meantime.
+-- ============================================================================
+create or replace function rehold_order_stock(p_order_id uuid)
+returns orders
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_order orders;
+  v_row   record;
+  v_item  items;
+begin
+  select * into v_order from orders where id = p_order_id for update;
+  if not found then raise exception 'ORDER_NOT_FOUND' using errcode = 'P0001'; end if;
+
+  -- Only a released order needs re-holding: one still awaiting payment, or
+  -- already in review, never gave its stock up.
+  if v_order.status <> 'rejected' then
+    return v_order;
+  end if;
+
+  for v_row in select * from order_items where order_id = p_order_id
+  loop
+    select * into v_item from items where id = v_row.item_id for update;
+
+    if not found then
+      raise exception 'ITEM_NOT_FOUND:%', v_row.name using errcode = 'P0001';
+    end if;
+    if not v_item.is_active then
+      raise exception 'ITEM_INACTIVE:%', v_item.name using errcode = 'P0001';
+    end if;
+    if (v_item.stock - v_item.reserved) < v_row.quantity then
+      raise exception 'OUT_OF_STOCK:%:%', v_item.name, greatest(v_item.stock - v_item.reserved, 0)
+        using errcode = 'P0001';
+    end if;
+
+    update items set reserved = reserved + v_row.quantity where id = v_item.id;
+  end loop;
+
+  return v_order;
+end $$;
+
+
+-- ============================================================================
 -- adjust_stock — admin stock-take. Always writes a ledger row.
 -- ============================================================================
 create or replace function adjust_stock(

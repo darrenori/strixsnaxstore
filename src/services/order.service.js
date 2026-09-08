@@ -139,28 +139,41 @@ export async function attachPaymentProof({ orderId, user, bytes, mimeType, payme
     throw new OrderError('That order is not waiting for payment.', 'ORDER_NOT_PAYABLE', 409);
   }
 
-  const updated = await transaction(async (client) => {
-    const { rows: [proof] } = await client.query(
-      `insert into payment_proofs(order_id, mime_type, byte_size, bytes, uploaded_by)
-       values ($1, $2, $3, $4, $5) returning id`,
-      [order.id, mimeType, bytes.length, bytes, user.id]
-    );
+  let updated;
+  try {
+    updated = await transaction(async (client) => {
+      // Rejecting an order put its stock back on the shelf, so a second
+      // screenshot has to take it off again. Without this the order rejoins
+      // the review queue holding nothing, and approving it would sell packets
+      // that somebody else has bought in the meantime.
+      await client.query('select rehold_order_stock($1)', [order.id]);
 
-    // Replacing a rejected order's proof: drop the previous image.
-    if (order.payment_proof_id) {
-      await client.query('delete from payment_proofs where id = $1', [order.payment_proof_id]);
-    }
+      const { rows: [proof] } = await client.query(
+        `insert into payment_proofs(order_id, mime_type, byte_size, bytes, uploaded_by)
+         values ($1, $2, $3, $4, $5) returning id`,
+        [order.id, mimeType, bytes.length, bytes, user.id]
+      );
 
-    const { rows: [row] } = await client.query(
-      `update orders
-          set payment_proof_id = $1, payment_ref = $2,
-              status = 'pending_review', review_note = null
-        where id = $3
-        returning ${ORDER_COLUMNS}`,
-      [proof.id, paymentRef ?? order.code, order.id]
-    );
-    return row;
-  });
+      // Replacing a rejected order's proof: drop the previous image.
+      if (order.payment_proof_id) {
+        await client.query('delete from payment_proofs where id = $1', [order.payment_proof_id]);
+      }
+
+      const { rows: [row] } = await client.query(
+        `update orders
+            set payment_proof_id = $1, payment_ref = $2,
+                status = 'pending_review', review_note = null
+          where id = $3
+          returning ${ORDER_COLUMNS}`,
+        [proof.id, paymentRef ?? order.code, order.id]
+      );
+      return row;
+    });
+  } catch (err) {
+    const friendly = parseDbError(err);
+    if (friendly) throw new OrderError(friendly.message, friendly.code, 409);
+    throw err;
+  }
 
   log.info('Payment proof attached', { code: updated.code, bytes: bytes.length });
   return toPublicOrder(updated, await loadItems(updated.id));
