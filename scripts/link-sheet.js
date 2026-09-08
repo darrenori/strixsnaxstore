@@ -92,6 +92,20 @@ try {
   title = meta.data.properties?.title ?? '(untitled)';
 } catch (err) {
   const status = err.status ?? err.code ?? err.response?.status;
+  const message = String(err.message ?? '');
+
+  // A disabled API answers 403 as well, so this has to be distinguished from a
+  // sharing problem before the 403 is blamed on the share.
+  if (/has not been used|is disabled|SERVICE_DISABLED|accessNotConfigured/i.test(message)) {
+    die(
+      'The Google Sheets API is not switched on for that Google Cloud project.',
+      '',
+      'Console → APIs & Services → Library → Google Sheets API → Enable.',
+      'It can take a minute to take effect.',
+      '',
+      dim(message)
+    );
+  }
   if (status === 403) {
     die(
       'The service account cannot open that sheet.',
@@ -110,10 +124,7 @@ try {
       'Check the URL you copied — it must be a Sheets file, not a Drive folder.'
     );
   }
-  if (status === 403 || String(err.message).includes('has not been used')) {
-    die('Enable the Google Sheets API on the project, then try again.', err.message);
-  }
-  die('Could not read that spreadsheet.', err.message);
+  die('Could not read that spreadsheet.', message);
 }
 
 console.log(`${ok('\u2713')} Opened "${title}" as an editor\n`);
