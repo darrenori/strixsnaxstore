@@ -7,8 +7,10 @@
 html, body {
   margin: 0;
   padding: 0;
-  background: #fbf4d4;            /* literal, so a late token file never shows canvas */
-  background: var(--bg);
+  /* Fallback inside the var(): a second declaration would not help, because an
+     undefined custom property makes the whole line invalid rather than falling
+     back to the one above it. */
+  background: var(--bg, #fbf4d4);
   color: var(--ink);
   font-family: var(--font-body);
   font-size: 16px;

@@ -5,9 +5,11 @@
    ========================================================================== */
 
 :root {
-  /* The poster is light by definition. Declaring this stops an Android client
-     in dark mode from handing the WebView a dark canvas underneath us. */
-  color-scheme: light;
+  /* `only light`, not plain `light`. Plain light says "this page has no dark
+     mode", which is exactly the invitation Chrome and Samsung Internet need to
+     darken it themselves on a phone set to dark. The `only` keyword declines
+     that, and still keeps the WebView canvas underneath us light. */
+  color-scheme: only light;
 
   /* --- Poster palette ---------------------------------------------------- */
   --cream:        #fbf4d4;
