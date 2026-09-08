@@ -107,14 +107,6 @@ router.post('/admin/orders/:id/reject', async (req, res, next) => {
   } catch (err) { return next(err); }
 });
 
-router.post('/admin/orders/:id/collected', async (req, res, next) => {
-  try {
-    const order = await orders.markCollected({ orderId: req.params.id, admin: req.user });
-    notifyBuyerOfDecision(order, 'collected').catch((e) => log.error('Notify failed', { error: e.message }));
-    return res.json({ order });
-  } catch (err) { return next(err); }
-});
-
 // ---------------------------------------------------------------------------
 // Stock taking
 // ---------------------------------------------------------------------------

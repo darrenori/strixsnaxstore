@@ -373,28 +373,6 @@ console.log('\n— a blocked shopper is shut out —');
 }
 
 // ---------------------------------------------------------------------------
-console.log('\n— collection is only for orders that were paid for —');
-{
-  const B = buyer(910112, 'Collector');
-  const item = bySku('HP-CHOCOLATE');
-  await setStockRow('HP-CHOCOLATE', 10);
-
-  const placed = await call('/api/orders', {
-    as: B,
-    method: 'POST',
-    body: { buyerName: 'Collector', cart: [{ itemId: item.id, quantity: 1 }] },
-  });
-  const id = placed.body.order.id;
-  const early = await call(`/api/admin/orders/${id}/collected`, { method: 'POST' });
-  check('an unpaid order cannot be marked collected', early.status === 409, `got ${early.status}`);
-
-  await uploadProof(id, B);
-  await call(`/api/admin/orders/${id}/approve`, { method: 'POST', body: {} });
-  const ok = await call(`/api/admin/orders/${id}/collected`, { method: 'POST' });
-  check('a paid order can be', ok.status === 200 && ok.body.order.status === 'collected');
-}
-
-// ---------------------------------------------------------------------------
 console.log('\n— the public URLs that do real work are all guarded —');
 {
   const noKey = await fetch(`${base}/api/cron/janitor`);

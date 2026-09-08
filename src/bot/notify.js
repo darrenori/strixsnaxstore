@@ -76,9 +76,6 @@ export async function notifyBuyerOfDecision(order, decision) {
       `\nYou already collected these items, so this one still needs settling. ` +
       `Open the store and upload a clearer screenshot, or message an admin if ` +
       `you think this is a mistake.`,
-    collected:
-      `📦 <b>Order collected</b>\n\n` +
-      `<b>${esc(order.code)}</b> is marked as picked up. Enjoy! 🐼`,
   };
 
   const body = messages[decision];

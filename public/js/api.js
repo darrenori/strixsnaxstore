@@ -65,7 +65,6 @@ export const api = {
   adminProof:    (id) => requestBlob(`/admin/orders/${id}/proof`),
   approve:       (id, note) => request(`/admin/orders/${id}/approve`, { method: 'POST', body: { note } }),
   reject:        (id, note) => request(`/admin/orders/${id}/reject`, { method: 'POST', body: { note } }),
-  collected:     (id) => request(`/admin/orders/${id}/collected`, { method: 'POST' }),
 
   adminCatalog:  () => request('/admin/catalog'),
   setStock:      (id, count, note) => request(`/admin/items/${id}/stock`, { method: 'POST', body: { count, note } }),

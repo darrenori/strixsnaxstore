@@ -20,7 +20,7 @@ screenshot, and every confirmed sale written into Google Sheets.
   already encoded, so the amount cannot be typed wrong.
 - Upload the payment screenshot in the app; get a Telegram message the moment
   an admin verifies it.
-- An order history with collection status.
+- An order history with the payment-verification status of every purchase.
 
 **For admins**
 - A verification queue: see the screenshot next to the order, approve or reject

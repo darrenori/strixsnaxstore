@@ -325,30 +325,11 @@ export async function rejectOrder({ orderId, admin, note, status = 'rejected' })
   return toPublicOrder(order, await loadItems(order.id));
 }
 
-/** Mark a paid order as handed over at the collection point. */
-export async function markCollected({ orderId, admin }) {
-  const order = await one('select id, status from orders where id = $1', [orderId]);
-  if (!order) throw new OrderError('Order not found.', 'ORDER_NOT_FOUND', 404);
-  if (order.status !== 'paid') {
-    throw new OrderError('Only a paid order can be collected.', 'NOT_PAID', 409);
-  }
-
-  const updated = await one(
-    `update orders set status = 'collected', reviewed_by = $1, reviewed_at = now()
-      where id = $2 returning ${ORDER_COLUMNS}`,
-    [admin.id, orderId]
-  );
-
-  await sheets.updateOrderStatus(updated);
-  return toPublicOrder(updated, await loadItems(updated.id));
-}
-
 /** Counts for the admin dashboard, in one round trip. */
 export async function getStats() {
   const row = await one(`
     select
       count(*) filter (where status = 'pending_review')                as pending_review,
-      count(*) filter (where status = 'paid')                          as awaiting_collection,
       count(*) filter (where created_at > now() - interval '24 hours') as orders_last_24h,
       coalesce(sum(total_cents) filter (where status in ('paid','collected')), 0) as revenue_cents
     from orders
@@ -356,7 +337,6 @@ export async function getStats() {
 
   return {
     pendingReview: Number(row?.pending_review ?? 0),
-    awaitingCollection: Number(row?.awaiting_collection ?? 0),
     ordersLast24h: Number(row?.orders_last_24h ?? 0),
     revenue: (Number(row?.revenue_cents ?? 0) / 100).toFixed(2),
   };
@@ -390,6 +370,6 @@ export async function pruneOldProofs(days = 60) {
 
 export default {
   placeOrder, getOrder, getOrderWithPayment, listUserOrders, attachPaymentProof,
-  getProof, cancelOrder, listOrders, approveOrder, rejectOrder, markCollected,
+  getProof, cancelOrder, listOrders, approveOrder, rejectOrder,
   getStats, expireStaleOrders, pruneOldProofs, OrderError,
 };

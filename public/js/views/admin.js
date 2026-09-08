@@ -122,19 +122,6 @@ function orderReviewCard(order, refresh) {
     actions.append(approve, reject);
   }
 
-  if (order.status === 'paid') {
-    const collected = el('button', { class: 'btn btn--sm btn--navy', type: 'button' }, '📦 MARK COLLECTED');
-    collected.addEventListener('click', () => withBusy(collected, '', async () => {
-      try {
-        await api.collected(order.id);
-        haptic('success');
-        toast(`${order.code} collected`, 'ok');
-        refresh();
-      } catch (err) { haptic('error'); toast(err.message, 'error'); }
-    }));
-    actions.append(collected);
-  }
-
   if (actions.children.length) card.append(actions);
   return card;
 }
@@ -142,7 +129,7 @@ function orderReviewCard(order, refresh) {
 function renderQueue(root) {
   const filters = ['pending_review', 'paid', 'awaiting_payment', 'rejected', ''];
   const labels = {
-    pending_review: 'To verify', paid: 'To collect',
+    pending_review: 'To verify', paid: 'Verified',
     awaiting_payment: 'Unpaid', rejected: 'Rejected', '': 'All',
   };
   let active = 'pending_review';
@@ -648,9 +635,6 @@ export function renderAdmin() {
           el('div', { class: 'stat' },
             el('div', { class: 'stat__val' }, String(summary.stats.pendingReview)),
             el('div', { class: 'stat__label' }, 'To verify')),
-          el('div', { class: 'stat' },
-            el('div', { class: 'stat__val' }, String(summary.stats.awaitingCollection)),
-            el('div', { class: 'stat__label' }, 'To collect')),
           el('div', { class: 'stat' },
             el('div', { class: 'stat__val' }, String(summary.stats.ordersLast24h)),
             el('div', { class: 'stat__label' }, 'Last 24h')),
