@@ -119,7 +119,18 @@ export function renderCart() {
       return toast('Tell us your name first', 'error');
     }
 
-    // Re-check against the freshest catalogue before spending the user's time.
+    // Reconcile against a catalogue we have just fetched, not the copy that
+    // may have been on screen since the app opened — someone else can have
+    // taken the last packet since then. A failed refresh is not worth losing
+    // a sale over: create_order re-checks stock under a row lock regardless.
+    submit.disabled = true;
+    try {
+      const fresh = await api.catalog();
+      state.catalog = fresh;
+      state.store = fresh.store;
+    } catch { /* offline or slow — fall through to the cached check */ }
+    submit.disabled = false;
+
     const dropped = reconcileCart();
     if (dropped.length) {
       haptic('warning');
