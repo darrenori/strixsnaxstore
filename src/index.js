@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 import config from './config.js';
 import log from './lib/logger.js';
-import { requireTelegramUser, requireAdmin } from './lib/auth.js';
+import { requireTelegramUser, requireAdmin, secretMatches } from './lib/auth.js';
 import catalogRoutes from './routes/catalog.js';
 import orderRoutes from './routes/orders.js';
 import adminRoutes from './routes/admin.js';
@@ -128,7 +128,7 @@ app.all('/api/cron/janitor', async (req, res) => {
   const secret = config.cronSecret;
   const presented = req.get('Authorization')?.replace(/^Bearer\s+/i, '')
     ?? req.query.key;
-  if (!secret || presented !== secret) return res.sendStatus(401);
+  if (!secretMatches(presented, secret)) return res.sendStatus(401);
 
   try {
     const expired = await expireStaleOrders();

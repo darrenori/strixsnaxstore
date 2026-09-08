@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { configureTelegram, getBot } from '../bot/index.js';
 import config from '../config.js';
+import { secretMatches } from '../lib/auth.js';
 import log from '../lib/logger.js';
 
 const router = Router();
@@ -26,7 +27,7 @@ function guard(req, res) {
     return false;
   }
   const presented = req.get('Authorization')?.replace(/^Bearer\s+/i, '') ?? req.query.key;
-  if (presented !== secret) {
+  if (!secretMatches(presented, secret)) {
     log.warn('Telegram setup attempted with a bad secret', { ip: req.ip });
     res.status(401).json({ error: 'Unauthorized.' });
     return false;

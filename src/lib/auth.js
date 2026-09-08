@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { verifyInitData, displayNameOf, InitDataError } from './telegram-auth.js';
 import { one } from './db.js';
 import config from '../config.js';
@@ -90,4 +91,26 @@ export async function isAdminTelegramId(telegramId) {
   return Boolean(row?.is_admin);
 }
 
-export default { requireTelegramUser, requireAdmin, upsertUser, isAdminTelegramId };
+
+/**
+ * Compare a presented shared secret against the configured one in time that
+ * does not depend on how much of it was right.
+ *
+ * `!==` on two strings stops at the first differing byte, so how long the
+ * answer takes leaks how long a correct prefix was. Across the open internet
+ * that signal sits well under the jitter, and these secrets are long and
+ * random, so this closes a theoretical door rather than an open one. It costs
+ * four lines.
+ */
+export function secretMatches(presented, expected) {
+  if (typeof presented !== 'string' || typeof expected !== 'string' || !expected) return false;
+  // timingSafeEqual throws when the lengths differ, which would be its own
+  // tell, so compare fixed-width digests rather than the raw bytes.
+  const a = crypto.createHash('sha256').update(presented).digest();
+  const b = crypto.createHash('sha256').update(expected).digest();
+  return crypto.timingSafeEqual(a, b);
+}
+
+export default {
+  requireTelegramUser, requireAdmin, upsertUser, isAdminTelegramId, secretMatches,
+};

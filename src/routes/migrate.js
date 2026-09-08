@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pool, one } from '../lib/db.js';
 import config from '../config.js';
+import { secretMatches } from '../lib/auth.js';
 import log from '../lib/logger.js';
 
 const router = Router();
@@ -34,7 +35,7 @@ router.post('/admin/migrate', async (req, res) => {
   }
 
   const presented = req.get('Authorization')?.replace(/^Bearer\s+/i, '') ?? req.query.key;
-  if (presented !== secret) {
+  if (!secretMatches(presented, secret)) {
     log.warn('Migration attempted with a bad secret', { ip: req.ip });
     return res.status(401).json({ error: 'Unauthorized.' });
   }
