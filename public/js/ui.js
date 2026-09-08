@@ -84,11 +84,13 @@ export function sgTime(iso) {
   });
 }
 
+// The buyer collects the moment their screenshot is up, so `pending_review`
+// is about the payment being checked, never about the snacks being held back.
 export const STATUS_LABEL = {
   awaiting_payment: 'Awaiting payment',
-  pending_review:   'Verifying',
-  paid:             'Ready to collect',
-  rejected:         'Rejected',
+  pending_review:   'Collect now',
+  paid:             'Verified',
+  rejected:         'Payment not verified',
   cancelled:        'Cancelled',
   collected:        'Collected',
 };

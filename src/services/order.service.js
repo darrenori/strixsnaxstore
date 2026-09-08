@@ -15,7 +15,7 @@ export class OrderError extends Error {
 const ORDER_COLUMNS = `
   id, code, user_id, telegram_id, buyer_name, status, subtotal_cents, total_cents,
   collection_points, note, payment_proof_id, payment_ref, reviewed_by, reviewed_at,
-  review_note, sheet_synced_at, expires_at, created_at, updated_at
+  review_note, sheet_synced_at, expires_at, stock_spent_at, created_at, updated_at
 `;
 
 function toPublicOrder(order, items = []) {
@@ -31,6 +31,10 @@ function toPublicOrder(order, items = []) {
     note: order.note ?? null,
     paymentRef: order.payment_ref ?? null,
     hasProof: Boolean(order.payment_proof_id),
+    // The snacks are the buyer's as soon as this is set — verification happens
+    // afterwards and does not gate collection.
+    collectNow: Boolean(order.stock_spent_at),
+    verified: order.status === 'paid' || order.status === 'collected',
     reviewNote: order.review_note ?? null,
     reviewedAt: order.reviewed_at ?? null,
     expiresAt: order.expires_at,
@@ -159,6 +163,12 @@ export async function attachPaymentProof({ orderId, user, bytes, mimeType, payme
         await client.query('delete from payment_proofs where id = $1', [order.payment_proof_id]);
       }
 
+      // The buyer collects now rather than waiting for an admin, so this is
+      // the moment the packets leave the shelf. Debiting here — not at
+      // approval — keeps the stock count matching what is physically there,
+      // which is what everyone else's availability is computed from.
+      await client.query('select settle_order_stock($1, $2)', [order.id, user.id]);
+
       const { rows: [row] } = await client.query(
         `update orders
             set payment_proof_id = $1, payment_ref = $2,
@@ -193,12 +203,19 @@ export async function getProof(orderId) {
 /** Buyer-initiated cancel, only while nothing has been reviewed yet. */
 export async function cancelOrder({ orderId, user }) {
   const order = await one(
-    'select id, status from orders where id = $1 and user_id = $2',
+    'select id, status, stock_spent_at from orders where id = $1 and user_id = $2',
     [orderId, user.id]
   );
   if (!order) throw new OrderError('Order not found.', 'ORDER_NOT_FOUND', 404);
-  if (!['awaiting_payment', 'pending_review'].includes(order.status)) {
-    throw new OrderError('That order can no longer be cancelled.', 'ORDER_NOT_CANCELLABLE', 409);
+
+  // Only before the snacks have been taken. Once a screenshot is up the buyer
+  // has collected, so cancelling would hand back stock that is already gone
+  // and quietly erase what they owe.
+  if (order.status !== 'awaiting_payment' || order.stock_spent_at) {
+    throw new OrderError(
+      'That order can no longer be cancelled — the items have been collected.',
+      'ORDER_NOT_CANCELLABLE', 409
+    );
   }
 
   try {

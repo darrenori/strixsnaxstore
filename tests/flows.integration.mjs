@@ -98,11 +98,11 @@ const bySku = (sku) => {
 };
 
 // ---------------------------------------------------------------------------
-console.log('\n— a rejected order must not be able to spend stock twice —');
-// The buyer uploads a screenshot, an admin rejects it (which puts the stock
-// back), and the buyer then uploads a second screenshot. The order returns to
-// the review queue, so the stock it needs must be held again — otherwise the
-// same packets are promised to two people at once.
+console.log('\n— the shelf is debited once, when the buyer collects —');
+// The buyer takes their snacks the moment the screenshot is up, so the shelf
+// is debited there and nowhere else. Rejection cannot credit it back — the
+// packets are in someone's bag — and neither a re-submission nor a later
+// approval may debit it a second time.
 {
   const B = buyer(910101, 'Rejected');
   const item = bySku('DR-COKE');
@@ -115,55 +115,70 @@ console.log('\n— a rejected order must not be able to spend stock twice —');
   });
   check('order placed', placed.status === 201, JSON.stringify(placed.body).slice(0, 120));
   const id = placed.body.order.id;
-  check('3 units held', (await stockOf('DR-COKE')).reserved === 3);
+  check('3 units held while they pay', (await stockOf('DR-COKE')).reserved === 3);
+  check('but not yet taken off the shelf', (await stockOf('DR-COKE')).stock === 5);
 
-  await uploadProof(id, B);
+  const up = await uploadProof(id, B);
+  check('the screenshot is accepted', up.status === 200, JSON.stringify(up.body).slice(0, 120));
+  check('the buyer is told to collect', up.body.order?.collectNow === true);
+  const afterUpload = await stockOf('DR-COKE');
+  check('the shelf is debited immediately', afterUpload.stock === 2 && afterUpload.reserved === 0,
+    JSON.stringify(afterUpload));
+
   const rej = await call(`/api/admin/orders/${id}/reject`, { method: 'POST', body: { note: 'blurry' } });
-  check('admin rejected it', rej.status === 200 && rej.body.order.status === 'rejected');
-  check('stock released on rejection', (await stockOf('DR-COKE')).reserved === 0);
+  check('an admin can still reject it later', rej.status === 200 && rej.body.order.status === 'rejected');
+  check('rejection invents no stock back', (await stockOf('DR-COKE')).stock === 2,
+    'the snacks are gone; crediting the shelf would make the count a lie');
 
   const second = await uploadProof(id, B);
-  if (second.status === 200) {
-    const held = (await stockOf('DR-COKE')).reserved;
-    check('a re-submitted order holds its stock again', held === 3,
-      `reserved=${held}, so those 3 cans are also still on sale to everyone else`);
-  } else {
-    check('re-submission is refused, so the stock cannot be promised twice',
-      second.status === 409, `got ${second.status}`);
-  }
+  check('a clearer screenshot is accepted', second.status === 200, `got ${second.status}`);
+  check('and moves no stock', (await stockOf('DR-COKE')).stock === 2);
+
+  const appr = await call(`/api/admin/orders/${id}/approve`, { method: 'POST', body: {} });
+  check('approving settles it', appr.status === 200 && appr.body.order.status === 'paid');
+  const finalStock = await stockOf('DR-COKE');
+  check('with the shelf still debited exactly once',
+    finalStock.stock === 2 && finalStock.reserved === 0, JSON.stringify(finalStock));
 }
 
 // ---------------------------------------------------------------------------
-console.log('\n— a re-submission is refused when the shelf has emptied meanwhile —');
-// The mirror image of the case above: the stock has to be re-held, so when it
-// is no longer there the buyer must be told, not quietly queued for an
-// approval that would oversell.
+console.log('\n— nobody can collect and then cancel —');
+// Cancelling used to be allowed right up until an admin reviewed the order.
+// Now that collecting happens first, that same window would let someone walk
+// off with the snacks and then erase what they owe.
 {
-  const B = buyer(910115, 'Unlucky');
+  const B = buyer(910115, 'Slippery');
   const item = bySku('RC-CHEESE');
-  await setStockRow('RC-CHEESE', 2);
+  await setStockRow('RC-CHEESE', 6);
 
   const placed = await call('/api/orders', {
     as: B,
     method: 'POST',
-    body: { buyerName: 'Unlucky', cart: [{ itemId: item.id, quantity: 2 }] },
+    body: { buyerName: 'Slippery', cart: [{ itemId: item.id, quantity: 2 }] },
   });
   const id = placed.body.order.id;
-  await uploadProof(id, B);
-  await call(`/api/admin/orders/${id}/reject`, { method: 'POST', body: { note: 'wrong amount' } });
 
-  // Somebody else takes the last two while this order sits rejected.
-  await setStockRow('RC-CHEESE', 0);
+  const early = await call(`/api/orders/${id}/cancel`, { as: B, method: 'POST' });
+  check('cancelling before collecting is fine', early.status === 200, `got ${early.status}`);
+  check('and the hold comes back', (await stockOf('RC-CHEESE')).reserved === 0);
 
-  const retry = await uploadProof(id, B);
-  check('the re-submission is refused', retry.status === 409, `got ${retry.status}`);
-  check('the buyer is told it sold out', /sold out|only/i.test(retry.body?.error ?? ''),
-    retry.body?.error);
+  const second = await call('/api/orders', {
+    as: B,
+    method: 'POST',
+    body: { buyerName: 'Slippery', cart: [{ itemId: item.id, quantity: 2 }] },
+  });
+  const collectedId = second.body.order.id;
+  await uploadProof(collectedId, B);
+  check('the shelf is debited on collection', (await stockOf('RC-CHEESE')).stock === 4);
 
-  const after = await call(`/api/orders/${id}`, { as: B });
-  check('the order stays rejected rather than rejoining the queue',
-    after.body.order.status === 'rejected', after.body.order?.status);
-  check('and nothing was reserved out of thin air', (await stockOf('RC-CHEESE')).reserved === 0);
+  const late = await call(`/api/orders/${collectedId}/cancel`, { as: B, method: 'POST' });
+  check('cancelling after collecting is refused', late.status === 409, `got ${late.status}`);
+  check('the buyer is told why', /collected/i.test(late.body?.error ?? ''), late.body?.error);
+  check('and the debt stands', (await stockOf('RC-CHEESE')).stock === 4);
+
+  const after = await call(`/api/orders/${collectedId}`, { as: B });
+  check('the order is still awaiting verification',
+    after.body.order.status === 'pending_review', after.body.order?.status);
 }
 
 

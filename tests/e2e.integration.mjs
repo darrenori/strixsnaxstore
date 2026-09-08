@@ -139,7 +139,9 @@ check('served with no-store', proofRes.headers.get('cache-control') === 'private
 console.log('\n— approval —');
 const before = await call('/api/admin/catalog', { as: ADMIN });
 const milkBefore = before.body.items.find((i) => i.sku === 'HP-MILK');
-check('stock reserved, not yet spent', milkBefore.stock === 24 && milkBefore.reserved === 2,
+// The buyer collects as soon as the screenshot is up, so the shelf is debited
+// then — an admin verifying later is bookkeeping, not a stock movement.
+check('the shelf is debited when the buyer collects', milkBefore.stock === 22 && milkBefore.reserved === 0,
   `stock=${milkBefore.stock} reserved=${milkBefore.reserved}`);
 
 const appr = await call(`/api/admin/orders/${orderId}/approve`, { as: ADMIN, method: 'POST', body: { note: 'ok' } });
@@ -147,7 +149,7 @@ check('approved', appr.status === 200 && appr.body.order.status === 'paid');
 
 const after = await call('/api/admin/catalog', { as: ADMIN });
 const milkAfter = after.body.items.find((i) => i.sku === 'HP-MILK');
-check('stock deducted on approval', milkAfter.stock === 22 && milkAfter.reserved === 0,
+check('approval moves no stock a second time', milkAfter.stock === 22 && milkAfter.reserved === 0,
   `stock=${milkAfter.stock} reserved=${milkAfter.reserved}`);
 
 console.log('\n— stock take —');

@@ -105,7 +105,7 @@ function uploader(order, onUploaded) {
   });
 
   const submit = el('button', { class: 'btn', type: 'button', disabled: true },
-    'SUBMIT FOR VERIFICATION');
+    'UPLOAD & COLLECT');
 
   let chosen = null;
   let previewUrl = null;
@@ -165,7 +165,7 @@ function uploader(order, onUploaded) {
       haptic('error');
       toast(err.message, 'error');
       submit.disabled = false;
-      submit.textContent = 'SUBMIT FOR VERIFICATION';
+      submit.textContent = 'UPLOAD & COLLECT';
     }
   });
 
@@ -175,7 +175,7 @@ function uploader(order, onUploaded) {
       el('li', {}, 'Scan the QR above with your banking app.'),
       el('li', {}, `Pay exactly ${money(order.totalCents)}.`),
       el('li', {}, 'Screenshot the confirmation screen.'),
-      el('li', {}, 'Upload it here — an admin verifies it and you get a message.')
+      el('li', {}, 'Upload it here, then take your snacks straight away.')
     ),
     fileInput,
     zone,
@@ -199,24 +199,28 @@ function waitingCard(order, rerender) {
 
   if (order.status === 'pending_review') {
     card.append(
-      el('p', {}, '🔍 Your screenshot is with the admins. You will get a Telegram message the moment it is verified — usually within a few minutes.'),
-      el('p', { class: 'muted' }, 'You can close the store; nothing is lost.')
+      el('p', { class: 'collect-now' }, '🎉 Go grab your snacks!'),
+      el('p', {}, `📍 Take them from ${(order.collectionPoints ?? []).join(' + ') || 'Blk B'} now — you do not have to wait for anyone.`),
+      el('p', { class: 'muted' }, 'An admin checks the payment later. If anything looks off they will message you.')
     );
   } else if (order.status === 'paid') {
     card.append(
-      el('p', {}, '✅ Payment verified! Show this screen when you collect.'),
-      el('p', { class: 'mb0' }, `📍 ${(order.collectionPoints ?? []).join(' + ') || 'Blk B'}`)
+      el('p', {}, '✅ Payment verified — all settled. Thanks! 🐼'),
+      el('p', { class: 'muted mb0' }, 'Nothing left to do.')
     );
   } else if (order.status === 'collected') {
-    card.append(el('p', {}, '📦 Collected. Enjoy! 🐼'));
+    card.append(el('p', {}, '📦 Collected and verified. Enjoy! 🐼'));
   } else if (order.status === 'rejected') {
     card.append(
       el('p', {}, '⚠️ An admin could not verify that payment.'),
       order.reviewNote ? el('p', { class: 'order__note' }, order.reviewNote) : null,
       el('p', { class: 'muted' },
-        'Upload another screenshot below and it goes straight back to the queue — '
-        + 'no need to start a new order. Your items were released in the meantime, '
-        + 'so if something has sold out since, we will tell you.')
+        order.collectNow
+          ? 'You already have these items, so this is about settling up. Upload a '
+            + 'clearer screenshot below, or message an admin if you think this is a mistake.'
+          : 'Upload another screenshot below and it goes straight back to the queue — '
+            + 'no need to start a new order. Your items were released in the meantime, '
+            + 'so if something has sold out since, we will tell you.')
     );
   } else if (order.status === 'cancelled') {
     card.append(el('p', {}, '✖️ This order was cancelled and the items are back on the shelf.'));
@@ -257,7 +261,7 @@ export function renderPayment(params) {
         qrCard(order, payment),
         receipt(order),
         uploader(order, (updated) => {
-          toast('Sent for verification 🎉', 'ok');
+          toast('Go grab your snacks! 🎉', 'ok');
           paint(updated, payment);
         })
       );
@@ -293,7 +297,7 @@ export function renderPayment(params) {
       ));
 
       root.append(uploader(order, (updated) => {
-        toast('Sent for verification 🎉', 'ok');
+        toast('Go grab your snacks! 🎉', 'ok');
         paint(updated, payment);
       }));
     } else {

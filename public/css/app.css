@@ -1067,3 +1067,16 @@ details.card > :not(summary) { margin-top: 12px; }
 @media (prefers-reduced-motion: reduce) {
   details.card > summary::after { transition: none; }
 }
+
+/* ---------------------------------------------------------------------------
+   Collect-now callout. The buyer takes their snacks the moment the screenshot
+   is up, so this is the single most important line on the screen — it has to
+   read as an instruction, not as a status.
+   --------------------------------------------------------------------------- */
+.collect-now {
+  font-family: var(--font-display);
+  font-size: 17px;
+  line-height: 1.25;
+  color: var(--ok);
+  margin: 0 0 10px;
+}

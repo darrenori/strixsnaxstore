@@ -118,9 +118,21 @@ create table if not exists orders (
   updated_at        timestamptz not null default now()
 );
 
+-- When the packets actually left the shelf.
+--
+-- The buyer collects as soon as they have uploaded a screenshot, rather than
+-- waiting for an admin, so the shelf is debited at that moment and not at
+-- approval. Recording when it happened is what keeps the debit to exactly one
+-- per order: a later approval, rejection or re-submission must not move stock
+-- a second time, because by then the snacks are already in someone's bag.
+alter table orders add column if not exists stock_spent_at timestamptz;
+
 create index if not exists orders_user_idx    on orders(user_id, created_at desc);
 create index if not exists orders_status_idx  on orders(status, created_at desc);
 create index if not exists orders_pending_idx on orders(expires_at) where status = 'awaiting_payment';
+-- Drives the "still to verify" queue, which is now the admin's whole job.
+create index if not exists orders_unverified_idx on orders(created_at desc)
+  where status = 'pending_review';
 
 create table if not exists order_items (
   id            uuid primary key default gen_random_uuid(),
@@ -311,8 +323,57 @@ begin
 end $$;
 
 -- ============================================================================
+-- settle_order_stock — the packets have physically left the shelf.
+--
+-- Turns the order's reservation into a real deduction and writes the ledger.
+-- Called when the buyer uploads their screenshot, because that is when they
+-- walk off with the snacks; an admin verifying the payment hours later is a
+-- bookkeeping step, not a stock movement.
+--
+-- Idempotent on stock_spent_at, so approval, rejection and re-submission can
+-- all call it without the shelf being debited twice.
+-- ============================================================================
+create or replace function settle_order_stock(p_order_id uuid, p_actor_id uuid default null)
+returns orders
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_order orders;
+  v_row   record;
+  v_bal   int;
+begin
+  select * into v_order from orders where id = p_order_id for update;
+  if not found then raise exception 'ORDER_NOT_FOUND' using errcode = 'P0001'; end if;
+
+  if v_order.stock_spent_at is not null then
+    return v_order;
+  end if;
+
+  for v_row in select * from order_items where order_id = p_order_id
+  loop
+    update items
+       set stock    = greatest(stock - v_row.quantity, 0),
+           reserved = greatest(reserved - v_row.quantity, 0)
+     where id = v_row.item_id
+    returning stock into v_bal;
+
+    insert into stock_movements(item_id, delta, balance_after, reason, order_id, actor_id)
+    values (v_row.item_id, -v_row.quantity, v_bal, 'order_paid', p_order_id, p_actor_id);
+  end loop;
+
+  update orders set stock_spent_at = now() where id = p_order_id returning * into v_order;
+  return v_order;
+end $$;
+
+-- ============================================================================
 -- approve_order — admin verified the PayNow screenshot.
--- Converts the reservation into a real stock deduction and logs the ledger.
+--
+-- By now the buyer has usually collected already, so this normally moves no
+-- stock at all. It still settles as a fallback: an admin can approve an order
+-- that never got a screenshot (someone paid in cash), and that order's
+-- reservation has to become a deduction somewhere.
 -- ============================================================================
 create or replace function approve_order(p_order_id uuid, p_admin_id uuid, p_note text default null)
 returns orders
@@ -334,17 +395,7 @@ begin
     raise exception 'ORDER_NOT_REVIEWABLE:%', v_order.status using errcode = 'P0001';
   end if;
 
-  for v_row in select * from order_items where order_id = p_order_id
-  loop
-    update items
-       set stock    = greatest(stock - v_row.quantity, 0),
-           reserved = greatest(reserved - v_row.quantity, 0)
-     where id = v_row.item_id
-    returning stock into v_bal;
-
-    insert into stock_movements(item_id, delta, balance_after, reason, order_id, actor_id)
-    values (v_row.item_id, -v_row.quantity, v_bal, 'order_paid', p_order_id, p_admin_id);
-  end loop;
+  perform settle_order_stock(p_order_id, p_admin_id);
 
   update orders
      set status = 'paid', reviewed_by = p_admin_id, reviewed_at = now(), review_note = p_note
@@ -357,7 +408,12 @@ begin
 end $$;
 
 -- ============================================================================
--- release_order — reject / cancel / expire. Puts the held stock back.
+-- release_order — reject / cancel / expire.
+--
+-- Puts a hold back on the shelf, but only a hold. Once an order's stock has
+-- been spent the buyer has physically taken the snacks, so rejecting their
+-- screenshot cannot restore anything — it records that the order was never
+-- paid for. Crediting the shelf there would invent stock that is not on it.
 -- ============================================================================
 create or replace function release_order(
   p_order_id uuid,
@@ -387,15 +443,17 @@ begin
     raise exception 'ORDER_ALREADY_PAID' using errcode = 'P0001';
   end if;
 
-  for v_row in select * from order_items where order_id = p_order_id
-  loop
-    update items set reserved = greatest(reserved - v_row.quantity, 0)
-     where id = v_row.item_id
-    returning stock into v_bal;
+  if v_order.stock_spent_at is null then
+    for v_row in select * from order_items where order_id = p_order_id
+    loop
+      update items set reserved = greatest(reserved - v_row.quantity, 0)
+       where id = v_row.item_id
+      returning stock into v_bal;
 
-    insert into stock_movements(item_id, delta, balance_after, reason, order_id, actor_id, note)
-    values (v_row.item_id, 0, v_bal, 'order_released', p_order_id, p_admin_id, p_note);
-  end loop;
+      insert into stock_movements(item_id, delta, balance_after, reason, order_id, actor_id, note)
+      values (v_row.item_id, 0, v_bal, 'order_released', p_order_id, p_admin_id, p_note);
+    end loop;
+  end if;
 
   update orders
      set status = p_status, reviewed_by = p_admin_id, reviewed_at = now(), review_note = p_note
@@ -434,6 +492,13 @@ begin
   -- Only a released order needs re-holding: one still awaiting payment, or
   -- already in review, never gave its stock up.
   if v_order.status <> 'rejected' then
+    return v_order;
+  end if;
+
+  -- Nor does one whose snacks are already gone. Rejecting that order returned
+  -- nothing to the shelf, so a second screenshot has nothing to take back off
+  -- it — re-holding here would reserve stock the buyer already walked out with.
+  if v_order.stock_spent_at is not null then
     return v_order;
   end if;
 

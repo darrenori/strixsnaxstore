@@ -118,8 +118,8 @@ export function createBot() {
 
       const labels = {
         awaiting_payment: '⏳ Awaiting payment',
-        pending_review:   '🔍 Being verified',
-        paid:             '✅ Paid — ready to collect',
+        pending_review:   '🛍 Yours — payment being checked',
+        paid:             '✅ Verified — all settled',
         rejected:         '⚠️ Rejected',
         cancelled:        '✖️ Cancelled',
         collected:        '📦 Collected',

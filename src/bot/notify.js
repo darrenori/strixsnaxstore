@@ -51,7 +51,8 @@ export async function notifyAdminsOfOrder(order, buyer) {
     `${orderLines(order)}\n\n` +
     `📍 ${esc((order.collectionPoints ?? []).join(' + ') || 'Blk B')}\n` +
     (order.note ? `📝 ${esc(order.note)}\n` : '') +
-    `\nOpen the store → <b>Admin</b> tab to view the screenshot and approve.`;
+    `\nThey have taken these already — no rush. Verify when you next do a ` +
+    `round: store → <b>Admin</b> tab.`;
 
   let sent = 0;
   for (const a of admins) {
@@ -64,17 +65,17 @@ export async function notifyAdminsOfOrder(order, buyer) {
 export async function notifyBuyerOfDecision(order, decision) {
   const messages = {
     approved:
-      `✅ <b>Payment confirmed!</b>\n\n` +
+      `✅ <b>Payment verified</b>\n\n` +
       `Order <b>${esc(order.code)}</b> — $${order.total}\n\n` +
       `${orderLines(order)}\n\n` +
-      `📍 Collect at <b>${esc((order.collectionPoints ?? []).join(' + ') || 'Blk B')}</b>\n` +
-      `Show this message when you pick up. Thanks for supporting STRIX! 🎉`,
+      `All settled — nothing more to do. Thanks for supporting STRIX! 🎉`,
     rejected:
-      `⚠️ <b>Payment could not be verified</b>\n\n` +
+      `⚠️ <b>We could not verify your payment</b>\n\n` +
       `Order <b>${esc(order.code)}</b> — $${order.total}\n` +
       (order.reviewNote ? `\nReason: ${esc(order.reviewNote)}\n` : '\n') +
-      `\nYour items have been released back to the shelf. ` +
-      `Reopen the store to try again, or message an admin if you think this is a mistake.`,
+      `\nYou already collected these items, so this one still needs settling. ` +
+      `Open the store and upload a clearer screenshot, or message an admin if ` +
+      `you think this is a mistake.`,
     collected:
       `📦 <b>Order collected</b>\n\n` +
       `<b>${esc(order.code)}</b> is marked as picked up. Enjoy! 🐼`,
