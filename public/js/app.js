@@ -11,6 +11,30 @@ import renderAdmin from './views/admin.js';
 const viewRoot = document.getElementById('view');
 const splash = document.getElementById('splash');
 
+const CATALOG_KEY = 'strix.catalog.v1';
+
+/**
+ * The last catalogue this device saw.
+ *
+ * The shelf holds the same two dozen items from one visit to the next, so
+ * making the shopper watch a splash screen while we confirm that over the
+ * network buys nothing. We draw the cached menu at once and correct it a
+ * moment later. Prices shown from cache are advisory in any case — the server
+ * recomputes every cent at checkout, so a stale one cannot be paid.
+ */
+function cachedCatalog() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(CATALOG_KEY) ?? 'null');
+    return raw && Array.isArray(raw.categories) ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+function cacheCatalog(catalog) {
+  try { localStorage.setItem(CATALOG_KEY, JSON.stringify(catalog)); } catch { /* private mode */ }
+}
+
 /**
  * Where "back" goes from each screen. Telegram shows its own back button, so
  * the app needs to agree with it rather than fight it.
@@ -35,7 +59,12 @@ function currentView() {
 
 let lastRouteKey = '';
 
+// Once the app has said it cannot start, nothing may paint over that — the
+// visibility listener would otherwise redraw a shop the shopper cannot use.
+let bootFailed = false;
+
 function render() {
+  if (bootFailed) return;
   const routeKey = `${state.route.name}:${JSON.stringify(state.route.params ?? {})}`;
   const routeChanged = routeKey !== lastRouteKey;
 
@@ -144,21 +173,31 @@ async function boot() {
 
   subscribe(render);
 
+  // Paint before the network is touched. With a cached catalogue that is the
+  // real shop; without one it is the chrome and placeholder rows, which still
+  // beats a splash because the app is on screen and scrollable the instant it
+  // opens rather than after a round trip.
+  const cached = cachedCatalog();
+  if (cached) {
+    state.catalog = cached;
+    state.store = cached.store;
+  }
+  document.getElementById('app').hidden = false;
+  splash.remove();
+  emit();
+
   try {
     const [me, catalog] = await withRetry(() => Promise.all([api.me(), api.catalog()]));
     state.me = me;
     state.catalog = catalog;
     state.store = catalog.store;
+    cacheCatalog(catalog);
     if (!state.buyerName) state.buyerName = me.displayName ?? me.firstName ?? '';
 
     const dropped = reconcileCart();
     if (dropped.length) {
       toast(`Some items changed: ${dropped.join(', ')}`, 'error');
     }
-
-    document.getElementById('app').hidden = false;
-    splash.classList.add('is-gone');
-    setTimeout(() => splash.remove(), 320);
 
     // Deep link: /start with a payload, e.g. an order code from a bot message.
     const startParam = tg.tg?.initDataUnsafe?.start_param;
@@ -168,7 +207,12 @@ async function boot() {
 
     if (me.isAdmin) refreshAdminBadge();
   } catch (err) {
-    showBootError(err);
+    // A signature problem stops the shopper ordering at all, so it has to be
+    // said plainly. A network blip with a cached menu does not — leave the
+    // shop up and mention it, rather than replacing a usable screen.
+    const fatal = !tg.inTelegram || STALE_SESSION.has(err.code) || !state.catalog;
+    if (fatal) showBootError(err);
+    else toast('Offline — showing the last menu you saw', 'error');
   }
 }
 
@@ -195,7 +239,8 @@ const STALE_SESSION = new Set(['INVALID_INIT_DATA', 'INIT_DATA_EXPIRED', 'MISSIN
 function showBootError(err) {
   const outsideTelegram = !tg.inTelegram;
   const stale = STALE_SESSION.has(err.code);
-  splash.replaceChildren(
+  document.getElementById('app').hidden = false;
+  viewRoot.replaceChildren(
     el('div', { class: 'badge badge--lg' },
       el('span', { class: 'badge__ay' }, 'AY2026/2027'),
       el('span', { class: 'badge__word' }, 'STRIX'),
@@ -230,6 +275,7 @@ function showBootError(err) {
         : null
     )
   );
+  bootFailed = true;
 }
 
 // Refresh the catalogue when the app comes back to the foreground, so a
