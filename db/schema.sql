@@ -3,7 +3,9 @@
 -- Applied by `npm run db:setup`, which is idempotent and safe to re-run.
 -- ============================================================================
 
-create extension if not exists "pgcrypto";
+-- No extensions required. Everything here is core Postgres, which keeps the
+-- schema applicable by a role without superuser and avoids depending on which
+-- schema a managed host installs extensions into.
 
 -- ---------------------------------------------------------------------------
 -- Enums
@@ -259,7 +261,12 @@ begin
     raise exception 'TOO_MANY_OPEN_ORDERS' using errcode = 'P0001';
   end if;
 
-  v_code := 'SNX-' || upper(substr(encode(gen_random_bytes(4), 'hex'), 1, 5));
+  -- Built from gen_random_uuid(), which is core Postgres, rather than
+  -- pgcrypto's gen_random_bytes(). Managed hosts install extensions into their
+  -- own schema — Supabase uses `extensions` — and this function pins
+  -- search_path to public, so a pgcrypto call resolves on a plain database and
+  -- then fails in production on the first order anyone tries to place.
+  v_code := 'SNX-' || upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 5));
 
   select coalesce((value #>> '{}')::int, 45) into v_expiry_min
   from settings where key = 'order_expiry_minutes';

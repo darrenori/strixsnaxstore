@@ -16,7 +16,7 @@
  * every suite starts from the same known shelf.
  */
 import { PGlite } from '@electric-sql/pglite';
-import { pgcrypto } from '@electric-sql/pglite/contrib/pgcrypto';
+
 import { PGLiteSocketServer } from '@electric-sql/pglite-socket';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -64,7 +64,10 @@ async function freePort() {
  * which also means no suite can see another's leftovers.
  */
 async function runSuite(name) {
-  const db = await PGlite.create({ extensions: { pgcrypto } });
+  // Deliberately no extensions. A managed host installs them into its own
+  // schema, so anything the schema needs from one resolves locally and then
+  // fails in production — running bare here is what catches that.
+  const db = await PGlite.create();
   for (const file of ['db/schema.sql', 'db/seed.sql']) {
     // eslint-disable-next-line no-await-in-loop
     await db.exec(fs.readFileSync(path.join(root, file), 'utf8'));
