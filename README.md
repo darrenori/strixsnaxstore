@@ -124,20 +124,30 @@ no more env edits.
 
 1. Google Cloud console → new project → enable the **Google Sheets API** and
    the **Google Drive API**.
-2. IAM → Service Accounts → create one → Keys → **Add key → JSON**.
-3. Copy `client_email` into `GOOGLE_SERVICE_ACCOUNT_EMAIL` and `private_key`
-   into `GOOGLE_PRIVATE_KEY` (keep the quotes and the `\n` escapes).
-4. Create the spreadsheet:
+2. IAM → Service Accounts → create one → Keys → **Add key → JSON**. Keep the
+   file that downloads.
+3. Hand that file to the app. It reads the key and writes the three variables
+   into `.env` itself, so there is no multi-line PEM block to paste:
+
+```bash
+npm run sheets:creds -- "C:\Users\you\Downloads\key.json"
+```
+
+4. Create the spreadsheet and share it with the account you want to read it
+   from:
 
 ```bash
 npm run sheets:bootstrap -- you@gmail.com
 ```
 
-That prints a `GOOGLE_SHEETS_ID`. Put it in `.env` and restart.
+That writes `GOOGLE_SHEETS_ID` into `.env` as well and prints the URL.
+Restart the server, then press **SYNC MENU TO SHEET** in the admin tab to
+confirm the credentials work — the catalogue should appear in *Items & Stock*.
 
 Service accounts have no Drive storage quota of their own. If the bootstrap
 fails with `storageQuotaExceeded`, make a blank sheet in your own Drive, share
-it with the service-account email as **Editor**, and use that id instead.
+it with the service-account email as **Editor**, and put that id in
+`GOOGLE_SHEETS_ID` instead.
 
 ### 5. PayNow
 

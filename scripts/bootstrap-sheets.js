@@ -9,9 +9,27 @@
  * GOOGLE_SHEETS_ID and restart the server.
  */
 import 'dotenv/config';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { sheets as sheetsApi, auth as googleAuth } from '@googleapis/sheets';
 import { drive as driveApi } from '@googleapis/drive';
 import { TABS } from '../src/lib/sheets.js';
+
+const envPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '.env');
+
+/** Write the new id straight into .env — one less thing to copy by hand. */
+function saveSheetId(id) {
+  if (!fs.existsSync(envPath)) return false;
+  const before = fs.readFileSync(envPath, 'utf8');
+  const line = `GOOGLE_SHEETS_ID=${id}`;
+  const existing = /^#?\s*GOOGLE_SHEETS_ID=.*$/m;
+  const after = existing.test(before)
+    ? before.replace(existing, line)
+    : `${before}${before.endsWith('\n') ? '' : '\n'}${line}\n`;
+  fs.writeFileSync(envPath, after, { mode: 0o600 });
+  return true;
+}
 
 const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
 const key = (process.env.GOOGLE_PRIVATE_KEY ?? '').replace(/\\n/g, '\n');
@@ -119,9 +137,15 @@ try {
   }
 
   console.log('\n✅ Spreadsheet created\n');
-  console.log(`   GOOGLE_SHEETS_ID=${spreadsheetId}\n`);
   console.log(`   https://docs.google.com/spreadsheets/d/${spreadsheetId}\n`);
-  console.log('Put that id in .env and restart the server.\n');
+
+  if (saveSheetId(spreadsheetId)) {
+    console.log('   GOOGLE_SHEETS_ID written to .env.\n');
+    console.log('   Restart the server, then use SYNC MENU TO SHEET in the admin tab.\n');
+  } else {
+    console.log(`   GOOGLE_SHEETS_ID=${spreadsheetId}\n`);
+    console.log('   No .env found — put that id in one and restart the server.\n');
+  }
 } catch (err) {
   console.error('\n❌ Could not create the spreadsheet:', err.message);
   if (String(err.message).includes('storageQuotaExceeded')) {
