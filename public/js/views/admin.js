@@ -40,7 +40,11 @@ function orderReviewCard(order, refresh) {
       el('div', {},
         el('div', { class: 'order__code' }, order.code),
         el('div', { class: 'order__when' },
-          `${order.buyerName}${order.username ? ` · @${order.username}` : ''} · ${relTime(order.createdAt)}`)
+          `${order.buyerName}${order.username ? ` · @${order.username}` : ''} · ${relTime(order.createdAt)}`),
+        // A display name is whatever the buyer typed and a @username can be
+        // changed or absent; the numeric id is the only thing that reliably
+        // says who actually paid.
+        el('div', { class: 'order__tgid' }, `ID ${order.telegramId}`)
       ),
       statusPill(order.status)
     ),

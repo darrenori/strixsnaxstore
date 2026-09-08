@@ -823,6 +823,15 @@ img { max-width: 100%; display: block; }
   font-size: 14.5px;
 }
 .order__when { font-size: 11px; color: var(--ink-faint); }
+/* Monospaced so two ids can be compared digit by digit, and selectable so an
+   admin can copy one straight into a Telegram search. */
+.order__tgid {
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 11px;
+  color: var(--ink-soft);
+  user-select: all;
+  -webkit-user-select: all;
+}
 .order__items { font-size: 13px; color: var(--ink-soft); margin: 6px 0; line-height: 1.6; }
 .order__foot {
   display: flex;
