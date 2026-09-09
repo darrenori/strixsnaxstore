@@ -1,12 +1,12 @@
 /**
  * Serverless-shape integration test.
  *
- * Drives api/index.js the way Vercel does — as a bare Node request handler,
+ * Drives api/index.js the way Vercel does - as a bare Node request handler,
  * with the request body already read before the handler runs. That last detail
  * is the one that silently breaks Express on serverless: its body parsers wait
  * on a stream that has already been consumed, and the request hangs until the
  * function times out. Vercel does this to every body, not just JSON, which is
- * why the screenshot upload gets its own test here — a hang on that path would
+ * why the screenshot upload gets its own test here - a hang on that path would
  * mean nobody can ever pay. Needs a database; see e2e.integration.mjs.
  */
 import crypto from 'node:crypto';
@@ -64,7 +64,7 @@ let pass = 0;
 let fail = 0;
 const check = (n, c, x = '') => {
   if (c) { pass += 1; console.log(`  OK   ${n}`); }
-  else { fail += 1; console.log(`  FAIL ${n}${x ? `  — ${x}` : ''}`); }
+  else { fail += 1; console.log(`  FAIL ${n}${x ? `  - ${x}` : ''}`); }
 };
 
 /** Anything that hangs here would hang the real function too, so time it out. */

@@ -2,7 +2,7 @@
  * Thin wrapper over the Telegram Mini App SDK.
  *
  * Everything here degrades to something sensible in a plain browser, so the
- * app can be developed and tested outside Telegram — the API will simply
+ * app can be developed and tested outside Telegram - the API will simply
  * reject the calls, which is exactly the behaviour we want.
  */
 export const tg = window.Telegram?.WebApp ?? null;
@@ -33,7 +33,7 @@ export function user() {
 }
 
 /**
- * The store is a printed poster — cream ground, red badge, gold lettering —
+ * The store is a printed poster - cream ground, red badge, gold lettering -
  * and that identity does not survive being recoloured. Rendered dark it reads
  * as some other shop, so the app stays light whatever the client is set to,
  * and asks Telegram to bring its own chrome to match rather than the reverse.

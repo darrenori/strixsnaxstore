@@ -1,4 +1,4 @@
-/** Small DOM helpers. No framework — the app is five screens and a form. */
+/** Small DOM helpers. No framework - the app is five screens and a form. */
 
 /** Escape text destined for innerHTML. Everything user-supplied goes through here. */
 export function esc(value) {
@@ -42,6 +42,14 @@ export function toast(message, kind = '') {
   toastTimer = setTimeout(() => { node.className = 'toast'; }, kind === 'error' ? 4200 : 2600);
 }
 
+/** The count on the Admin tab. Written from two places, so it lives here. */
+export function setAdminBadge(count) {
+  const badge = document.getElementById('adminBadge');
+  if (!badge) return;
+  badge.textContent = String(count);
+  badge.hidden = count === 0;
+}
+
 export function empty({ icon = '🐼', title = 'Nothing here', text = '' } = {}) {
   return el('div', { class: 'empty' },
     el('div', { class: 'empty__icon' }, icon),
@@ -54,7 +62,7 @@ export function skeletons(count = 4) {
   return el('div', {}, ...Array.from({ length: count }, () => el('div', { class: 'skeleton' })));
 }
 
-/** "3 minutes ago" / "in 12 min" — friendlier than a raw timestamp on a phone. */
+/** "3 minutes ago" / "in 12 min" - friendlier than a raw timestamp on a phone. */
 export function relTime(iso) {
   const then = new Date(iso).getTime();
   if (!Number.isFinite(then)) return '';
@@ -112,15 +120,21 @@ export async function withBusy(button, label, fn) {
   }
 }
 
+/**
+ * "Hello Panda" plus "Milk" reads as one product name everywhere the two have
+ * to appear together. A plain hyphen, because the store's own sublines already
+ * use a middot to separate facts and two different separators in one line is
+ * one more than anybody can follow.
+ */
 export function itemLabel(item) {
-  return [item.name, item.variant].filter(Boolean).join(' — ');
+  return [item.name, item.variant].filter(Boolean).join(' - ');
 }
 
 /**
  * An in-page text prompt.
  *
- * `window.prompt` is unreliable inside Telegram's in-app webview — on several
- * platforms it is a no-op that returns null — and the Mini App SDK has no
+ * `window.prompt` is unreliable inside Telegram's in-app webview - on several
+ * platforms it is a no-op that returns null - and the Mini App SDK has no
  * text-input popup of its own. So the admin screens ask for a rejection reason
  * or a new price through this instead.
  *

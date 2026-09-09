@@ -42,7 +42,7 @@ export const config = {
   isProd: optional('NODE_ENV', 'development') === 'production',
   port: intOf('PORT', 3000),
 
-  /** Public https origin the Mini App is served from — Telegram requires https. */
+  /** Public https origin the Mini App is served from - Telegram requires https. */
   publicUrl: optional('PUBLIC_URL', '').replace(/\/$/, ''),
 
   /** Shared secret for the scheduled-maintenance endpoint. */
@@ -55,7 +55,7 @@ export const config = {
     botToken: required('TELEGRAM_BOT_TOKEN'),
     /**
      * Where the Bot API lives. Overridable so the bot can be pointed at a
-     * self-hosted Bot API server — and so tests can drive the real handlers
+     * self-hosted Bot API server - and so tests can drive the real handlers
      * against a stub instead of messaging actual people.
      */
     apiRoot: optional('TELEGRAM_API_ROOT', 'https://api.telegram.org'),
@@ -80,6 +80,14 @@ export const config = {
     serviceAccountEmail: optional('GOOGLE_SERVICE_ACCOUNT_EMAIL'),
     // Stored with literal \n in .env; turn them back into real newlines.
     privateKey: optional('GOOGLE_PRIVATE_KEY').replace(/\\n/g, '\n'),
+    /**
+     * Where the Sheets API lives, for the same reason TELEGRAM_API_ROOT
+     * exists: the collation is the part of this shop most likely to be
+     * quietly wrong, and the only way to test it is to let it make its real
+     * calls against something that answers like Google. Unset in production,
+     * where the real endpoint and a real service-account key are used.
+     */
+    apiRoot: optional('GOOGLE_SHEETS_API_ROOT'),
   },
 
   paynow: {
@@ -99,6 +107,15 @@ export const config = {
     /** Telegram user ids that are admins no matter what the DB says. */
     bootstrapAdminIds: idList('ADMIN_TELEGRAM_IDS'),
     maxUploadBytes: intOf('MAX_UPLOAD_BYTES', 10 * 1024 * 1024),
+    /**
+     * Units left at which the admins get told to restock.
+     *
+     * Separate from each item's own `low_stock_at`, which is a display
+     * threshold and is set generously so the shop can show "only a few left".
+     * Alerting on that would message the committee about a box of 24 the
+     * moment it dropped to 5. This is the "go and refill it" number.
+     */
+    lowStockAlertAt: intOf('LOW_STOCK_ALERT_AT', 2),
   },
 };
 

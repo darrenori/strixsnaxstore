@@ -4,6 +4,7 @@ import log from '../lib/logger.js';
 import { upsertUser, isAdminTelegramId } from '../lib/auth.js';
 import { query, one } from '../lib/db.js';
 import * as catalogService from '../services/catalog.service.js';
+import { handleProofPhoto, handleProofChoice } from './proof.js';
 import { esc } from './notify.js';
 
 let bot = null;
@@ -67,10 +68,10 @@ export function createBot() {
     const keyboard = storeKeyboard();
     const name = esc(ctx.from.first_name ?? 'there');
     const text =
-      `👋 Hey ${name}! Welcome to <b>${esc(config.store.name)}</b> — ${esc(config.store.academicYear)}.\n\n` +
+      `👋 Hey ${name}! Welcome to <b>${esc(config.store.name)}</b>, ${esc(config.store.academicYear)}.\n\n` +
       `🐼 <b>Snax</b> at Blk B Lounge · 🥤 <b>Drinks</b> at Blk B Pantry\n` +
       `We are open <b>24/7</b>.\n\n` +
-      `Tap below to browse the menu, pay by PayNow and get your order confirmed — ` +
+      `Tap below to browse the menu, pay by PayNow and get your order confirmed. ` +
       `no more Google Forms.`;
 
     if (keyboard) {
@@ -89,9 +90,9 @@ export function createBot() {
 
       const sections = categories.map((c) => {
         const lines = c.items.map((i) => {
-          const label = esc([i.name, i.variant].filter(Boolean).join(' — '));
+          const label = esc([i.name, i.variant].filter(Boolean).join(' - '));
           const badge = !i.inStock ? ' <i>(sold out)</i>' : i.isLow ? ' ⚠️' : '';
-          return `  • ${label} — <b>$${i.price}</b>${badge}`;
+          return `  • ${label} - <b>$${i.price}</b>${badge}`;
         }).join('\n');
         return `<b>${esc(c.name.toUpperCase())}</b>  <i>${esc(c.collectionPoint)}</i>\n${lines}`;
       });
@@ -118,14 +119,14 @@ export function createBot() {
 
       const labels = {
         awaiting_payment: '⏳ Awaiting payment',
-        pending_review:   '🛍 Yours — payment being checked',
-        paid:             '✅ Verified — all settled',
+        pending_review:   '🛍 Yours, payment being checked',
+        paid:             '✅ Verified, all settled',
         rejected:         '⚠️ Rejected',
         cancelled:        '✖️ Cancelled',
         collected:        '📦 Collected',
       };
       const list = rows.map((o) =>
-        `<b>${esc(o.code)}</b> — $${(o.total_cents / 100).toFixed(2)}\n   ${labels[o.status] ?? o.status}`
+        `<b>${esc(o.code)}</b> - $${(o.total_cents / 100).toFixed(2)}\n   ${labels[o.status] ?? o.status}`
       ).join('\n\n');
 
       return ctx.replyWithHTML(`🧾 <b>Your recent orders</b>\n\n${list}`);
@@ -153,7 +154,7 @@ export function createBot() {
       ]);
       const keyboard = storeKeyboard();
       const lowList = low.slice(0, 8)
-        .map((i) => `  • ${esc([i.name, i.variant].filter(Boolean).join(' — '))} — <b>${i.available}</b>`)
+        .map((i) => `  • ${esc([i.name, i.variant].filter(Boolean).join(' - '))} - <b>${i.available}</b>`)
         .join('\n');
 
       return ctx.replyWithHTML(
@@ -173,13 +174,17 @@ export function createBot() {
   bot.help((ctx) =>
     ctx.replyWithHTML(
       `<b>STRIX Snax Store</b>\n\n` +
-      `/start — open the store\n` +
-      `/menu — today's menu and prices\n` +
-      `/orders — your recent orders\n` +
-      `/id — your Telegram id\n` +
-      `/admin — admin summary (admins only)`
+      `/start - open the store\n` +
+      `/menu - today's menu and prices\n` +
+      `/orders - your recent orders\n` +
+      `/id - your Telegram id\n` +
+      `/admin - admin summary (admins only)\n\n` +
+      `To pay for an order, send its payment screenshot straight to this chat.`
     )
   );
+
+  // The buyer picked which order a screenshot belongs to.
+  bot.action(/^proof:/, handleProofChoice);
 
   // Data sent back from the Mini App via Telegram.WebApp.sendData().
   bot.on('message', async (ctx, next) => {
@@ -187,6 +192,23 @@ export function createBot() {
     if (!webAppData) return next();
     log.info('web_app_data received', { from: ctx.from.id });
     return ctx.reply('Got it! Check the store for your order status.');
+  });
+
+  // A photo, or an image sent as a file, is a payment screenshot. This is now
+  // the way proof of payment reaches the shop, so it sits on the ordinary
+  // message path rather than behind a command nobody would think to type.
+  bot.on(['photo', 'document'], handleProofPhoto);
+
+  // Anything else in a private chat is somebody talking to the shop. Say what
+  // the bot is for rather than staying silent, which reads as broken.
+  bot.on('text', (ctx, next) => {
+    if (ctx.chat?.type !== 'private') return next();
+    if (String(ctx.message.text ?? '').startsWith('/')) return next();
+    return ctx.replyWithHTML(
+      `I take snack orders and payment screenshots. 🐼\n\n` +
+      `Press /start to open the store, /menu for today's prices, or send me the ` +
+      `screenshot of your PayNow payment to settle an order.`
+    );
   });
 
   bot.catch((err, ctx) => {
@@ -210,7 +232,7 @@ export const BOT_COMMANDS = [
  * and, when a webhook URL is given, where to deliver updates.
  *
  * On a long-running host launchBot() does this at boot. A serverless
- * deployment never boots, so the same work is reachable over HTTP — see
+ * deployment never boots, so the same work is reachable over HTTP - see
  * src/routes/telegram-setup.js. Keeping it in one function means the two
  * paths cannot drift apart.
  */
@@ -223,8 +245,8 @@ export async function configureTelegram({
   const done = { commands: false, menuButton: false, webhook: false };
   const skipped = [];
 
-  // Best effort, deliberately. Telegram rate-limits setMyCommands hard — a few
-  // restarts in a row is enough to earn a several-minute cooldown — and the
+  // Best effort, deliberately. Telegram rate-limits setMyCommands hard - a few
+  // restarts in a row is enough to earn a several-minute cooldown - and the
   // command list is cosmetic. Letting a 429 here abort the run would leave the
   // webhook unregistered, which is the one thing that decides whether the bot
   // answers at all.
@@ -275,7 +297,7 @@ export async function launchBot() {
   if (useWebhook) {
     log.info('Bot running via webhook', { url: config.telegram.webhookUrl });
   } else {
-    // Fire and forget — launch() only resolves when polling stops.
+    // Fire and forget - launch() only resolves when polling stops.
     instance.launch({ dropPendingUpdates: true })
       .catch((err) => log.error('Bot polling stopped', { error: err.message }));
     log.info('Bot running via long polling');

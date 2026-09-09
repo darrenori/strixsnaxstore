@@ -39,7 +39,7 @@ test('health check answers without any Telegram data', async () => {
   const body = await res.json();
   assert.equal(body.service, 'strix-snax-store');
   // The check touches Postgres, so it means "can serve orders", not merely
-  // "process is alive". No database is reachable in tests, so it must fail —
+  // "process is alive". No database is reachable in tests, so it must fail -
   // a 200 here would mean the check is not actually checking anything.
   assert.equal(res.status, 503);
   assert.equal(body.ok, false);
@@ -92,7 +92,7 @@ test('admin routes are unreachable without a signature', async () => {
 
 test('a signed request gets past auth and reaches the data layer', async () => {
   // Supabase is unreachable in tests, so a 5xx here proves the signature was
-  // accepted and the request went on to query — which is what we want to know.
+  // accepted and the request went on to query - which is what we want to know.
   const initData = signInitData({
     user: JSON.stringify({ id: 42, first_name: 'Test' }),
     auth_date: String(Math.floor(Date.now() / 1000)),

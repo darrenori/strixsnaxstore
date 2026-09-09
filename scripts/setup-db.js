@@ -28,7 +28,7 @@ const connectionString = process.env.DATABASE_URL;
  *
  * Worth doing before we connect: pg resolves anything it cannot parse as a URI
  * against the base `postgres://base`, so an unedited placeholder arrives as
- * `getaddrinfo ENOTFOUND base` — a hostname that appears nowhere in .env and
+ * `getaddrinfo ENOTFOUND base` - a hostname that appears nowhere in .env and
  * reads like a network fault rather than a typo.
  */
 function describeUrlProblem(raw) {
@@ -75,7 +75,7 @@ if (!connectionString) {
 
 const problem = describeUrlProblem(connectionString);
 if (problem) {
-  console.error(`\n⚠️  DATABASE_URL is not a usable Postgres URI — ${problem}.\n`);
+  console.error(`\n⚠️  DATABASE_URL is not a usable Postgres URI - ${problem}.\n`);
   explainConnectionUri();
   process.exit(1);
 }
@@ -117,14 +117,14 @@ try {
   if (err.position) console.error(`   near character ${err.position}`);
 
   if (err.code === 'ENOTFOUND' && err.hostname === 'base') {
-    console.error('\n   `base` is not your database — it is pg\'s fallback host for a');
+    console.error('\n   `base` is not your database - it is pg\'s fallback host for a');
     console.error('   connection string it could not parse. DATABASE_URL is malformed.\n');
     explainConnectionUri();
   } else if (err.code === 'ENOTFOUND') {
     console.error(`\n   The host \`${err.hostname}\` does not resolve. Check it for a typo,`);
     console.error('   and check that the project has not been paused.\n');
   } else if (err.code === 'ECONNREFUSED' || err.code === 'ETIMEDOUT') {
-    console.error('\n   The host resolved but refused the connection. Check the port —');
+    console.error('\n   The host resolved but refused the connection. Check the port -');
     console.error('   the session pooler is 5432, not 6543.\n');
   } else if (/password authentication failed/i.test(err.message)) {
     console.error('\n   The host and port are right, the password is not. If it contains');

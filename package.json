@@ -2,7 +2,7 @@
   "name": "strix-snax-store",
   "version": "1.0.0",
   "private": true,
-  "description": "STRIX Snax Store — Telegram bot + Mini App storefront with Supabase backend, PayNow payment verification and Google Sheets collation.",
+  "description": "STRIX Snax Store - Telegram bot + Mini App storefront with Supabase backend, PayNow payment verification and Google Sheets collation.",
   "type": "module",
   "engines": {
     "node": ">=20"

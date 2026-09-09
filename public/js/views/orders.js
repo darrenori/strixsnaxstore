@@ -2,7 +2,7 @@ import { el, empty, skeletons, statusPill, relTime, sgTime, itemLabel, toast } f
 import { navigate } from '../store.js';
 import api from '../api.js';
 
-/** The buyer's own order history — the part a Google Form never gave them. */
+/** The buyer's own order history - the part a Google Form never gave them. */
 function orderCard(order) {
   const needsAction = order.status === 'awaiting_payment' || order.status === 'rejected';
 
@@ -39,7 +39,7 @@ function orderCard(order) {
     actions.append(el('button', {
       class: 'btn btn--sm', type: 'button',
       onClick: () => navigate('payment', { orderId: order.id }),
-    }, 'RE-UPLOAD PROOF'));
+    }, 'SEND NEW SCREENSHOT'));
   } else {
     actions.append(el('button', {
       class: 'btn btn--sm btn--ghost', type: 'button',

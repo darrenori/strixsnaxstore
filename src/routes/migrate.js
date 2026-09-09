@@ -15,7 +15,7 @@ const dbDir = path.join(__dirname, '..', '..', 'db');
  * One-shot database setup, triggered over HTTP.
  *
  * Normally you would run `npm run db:setup` from a laptop, but a managed
- * database is often only reachable from the deployed app — a CI sandbox or a
+ * database is often only reachable from the deployed app - a CI sandbox or a
  * locked-down network cannot open a Postgres connection to it at all. Running
  * the same two files from inside the deployment sidesteps that entirely.
  *

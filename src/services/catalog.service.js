@@ -1,10 +1,14 @@
 import { query, one } from '../lib/db.js';
 
-const ITEM_COLUMNS = `
-  id, sku, name, variant, description, price_cents, emoji, image_url,
-  is_special, is_top_pick, is_active, stock, reserved, low_stock_at, sort_order,
-  updated_at, category_id
-`;
+const ITEM_FIELDS = [
+  'id', 'sku', 'name', 'variant', 'description', 'price_cents', 'emoji', 'image_url',
+  'is_special', 'is_top_pick', 'is_active', 'stock', 'reserved', 'low_stock_at',
+  'sort_order', 'updated_at', 'category_id',
+];
+
+const ITEM_COLUMNS = ITEM_FIELDS.join(', ');
+/** The same list against an aliased `items` table, for the joined queries. */
+const ITEM_COLUMNS_I = ITEM_FIELDS.map((f) => `i.${f}`).join(', ');
 
 /** Shape a DB row for the Mini App. Stock is exposed as a coarse signal only. */
 function toPublicItem(row, category) {
@@ -34,11 +38,11 @@ function toPublicItem(row, category) {
 
 /** Full catalogue grouped by category, ready to render. */
 export async function getCatalog({ includeInactive = false } = {}) {
-  const categories = await query('select * from categories order by sort_order');
+  const categories = await query('select * from categories order by sort_order, name');
   const items = await query(
     `select ${ITEM_COLUMNS} from items
      ${includeInactive ? '' : 'where is_active'}
-     order by sort_order`
+     order by sort_order, name`
   );
 
   const byId = new Map(categories.map((c) => [c.id, c]));
@@ -62,10 +66,22 @@ export async function getCatalog({ includeInactive = false } = {}) {
   };
 }
 
-/** Everything an admin needs, including hidden items and raw stock numbers. */
+/**
+ * Everything an admin needs, including hidden items and raw stock numbers.
+ *
+ * Ordered by category first. The admin screens group consecutive runs of the
+ * same category into one card, so ordering on the item's own sort_order alone
+ * interleaves two categories that happen to number their items the same way,
+ * and "Hello Panda" shows up three times with one row under each heading.
+ */
 export async function getAdminCatalog() {
-  const categories = await query('select * from categories order by sort_order');
-  const items = await query(`select ${ITEM_COLUMNS} from items order by sort_order`);
+  const categories = await query('select * from categories order by sort_order, name');
+  const items = await query(`
+    select ${ITEM_COLUMNS_I}
+      from items i
+      join categories c on c.id = i.category_id
+     order by c.sort_order, c.name, i.sort_order, i.name
+  `);
   const byId = new Map(categories.map((c) => [c.id, c]));
 
   return {
@@ -116,7 +132,7 @@ export async function setSetting(key, value) {
   );
 }
 
-/** Items at or below their low-stock threshold — drives the admin alert badge. */
+/** Items at or below their low-stock threshold - drives the admin alert badge. */
 export async function getLowStockItems() {
   return query(`
     select ${ITEM_COLUMNS}, greatest(stock - reserved, 0) as available

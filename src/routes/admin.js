@@ -33,10 +33,15 @@ router.get('/admin/summary', async (req, res, next) => {
       },
       integrations: {
         sheets: sheetsEnabled(),
-        sheetUrl: config.sheets.spreadsheetId
+        // Only offered when the collation is actually running. A spreadsheet
+        // id with no working credentials behind it produces a link to a sheet
+        // nothing has ever written to, which reads as the integration being
+        // fine right up until somebody needs the data.
+        sheetUrl: sheetsEnabled()
           ? `https://docs.google.com/spreadsheets/d/${config.sheets.spreadsheetId}`
           : null,
         paynowDynamic: Boolean(config.paynow.proxyValue),
+        lowStockAlertAt: config.store.lowStockAlertAt,
       },
     });
   } catch (err) { next(err); }
@@ -164,11 +169,12 @@ router.post('/admin/stock-take', async (req, res, next) => {
   try {
     const parsed = bulkSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'Invalid stock take.' });
+    // bulkSetStock writes the ledger, pushes the sheet and checks the shelf
+    // for low lines once the counts are in, so nothing else is needed here.
     const results = await admin.bulkSetStock({
       admin: req.user,
       entries: parsed.data.entries.map((e) => ({ ...e, note: parsed.data.note || 'Stock take' })),
     });
-    await admin.syncCatalogToSheets();
     return res.json({ results, updated: results.filter((r) => r.ok).length });
   } catch (err) { return next(err); }
 });
@@ -316,7 +322,7 @@ router.post('/admin/sheets/sync', async (req, res, next) => {
   } catch (err) { return next(err); }
 });
 
-/** The other direction — take what was typed in the sheet and apply it. */
+/** The other direction - take what was typed in the sheet and apply it. */
 router.post('/admin/sheets/import', async (req, res, next) => {
   try {
     if (!sheetsEnabled()) {

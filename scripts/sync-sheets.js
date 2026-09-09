@@ -5,7 +5,7 @@ import { syncCatalog, ensureTabs, sheetsEnabled } from '../src/lib/sheets.js';
 import { getCatalogForSheets } from '../src/services/catalog.service.js';
 
 if (!sheetsEnabled()) {
-  console.error('⚠️  Google Sheets is not configured — check GOOGLE_SHEETS_ID and the service account vars.');
+  console.error('⚠️  Google Sheets is not configured - check GOOGLE_SHEETS_ID and the service account vars.');
   process.exit(1);
 }
 

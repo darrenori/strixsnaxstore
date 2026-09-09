@@ -1,5 +1,6 @@
 import { query, one, rpc, parseDbError } from '../lib/db.js';
 import * as sheets from '../lib/sheets.js';
+import { syncCatalogToSheets, queueStockFollowUp } from './collation.service.js';
 import { getCatalogForSheets } from './catalog.service.js';
 import log from '../lib/logger.js';
 
@@ -28,27 +29,26 @@ function toAdminError(err, fallback) {
 // Stock taking
 // ---------------------------------------------------------------------------
 
-/** Set an absolute count — what a physical stock-take actually produces. */
-export async function setStock({ itemId, admin, count, note }) {
+/**
+ * Set an absolute count, which is what a physical stock-take produces.
+ *
+ * `collate` is off for the bulk path, so a stock-take of twenty lines pushes
+ * the spreadsheet once at the end rather than twenty times over.
+ */
+export async function setStock({ itemId, admin, count, note, collate = true }) {
   let item;
   try {
     item = await rpc('set_stock', [itemId, admin.id, count, note ?? 'Stock take']);
   } catch (err) {
     throw toAdminError(err, 'Could not update stock.');
   }
-
-  await sheets.recordStockMovement({
-    sku: item.sku,
-    item_name: [item.name, item.variant].filter(Boolean).join(' — '),
-    delta: 0, balance_after: item.stock, reason: 'correction',
-    actor_name: adminName(admin), note: note ?? 'Stock take',
-  });
+  if (collate) queueStockFollowUp();
 
   log.info('Stock set', { sku: item.sku, count, admin: admin.telegram_id });
   return item;
 }
 
-/** Relative change — restocking a box of 24, or writing off a spoiled one. */
+/** Relative change: restocking a box of 24, or writing off a spoiled one. */
 export async function adjustStock({ itemId, admin, delta, reason = 'manual_adjust', note }) {
   let item;
   try {
@@ -56,13 +56,7 @@ export async function adjustStock({ itemId, admin, delta, reason = 'manual_adjus
   } catch (err) {
     throw toAdminError(err, 'Could not adjust stock.');
   }
-
-  await sheets.recordStockMovement({
-    sku: item.sku,
-    item_name: [item.name, item.variant].filter(Boolean).join(' — '),
-    delta, balance_after: item.stock, reason,
-    actor_name: adminName(admin), note: note ?? '',
-  });
+  queueStockFollowUp();
 
   log.info('Stock adjusted', { sku: item.sku, delta, admin: admin.telegram_id });
   return item;
@@ -71,13 +65,20 @@ export async function adjustStock({ itemId, admin, delta, reason = 'manual_adjus
 /** Apply a whole stock-take sheet in one go. */
 export async function bulkSetStock({ admin, entries }) {
   const results = [];
+
   for (const entry of entries) {
     try {
-      results.push({ itemId: entry.itemId, ok: true, item: await setStock({ ...entry, admin }) });
+      results.push({
+        itemId: entry.itemId,
+        ok: true,
+        item: await setStock({ ...entry, admin, collate: false }),
+      });
     } catch (err) {
       results.push({ itemId: entry.itemId, ok: false, error: err.message });
     }
   }
+
+  queueStockFollowUp();
   return results;
 }
 
@@ -105,7 +106,7 @@ export async function listStockMovements({ itemId = null, limit = 50 } = {}) {
     note: r.note,
     createdAt: r.created_at,
     sku: r.sku ?? '',
-    itemName: r.name ? [r.name, r.variant].filter(Boolean).join(' — ') : 'Deleted item',
+    itemName: r.name ? [r.name, r.variant].filter(Boolean).join(' - ') : 'Deleted item',
     orderCode: r.order_code ?? null,
     actor: r.telegram_id ? adminName(r) : 'system',
   }));
@@ -155,7 +156,7 @@ export async function createItem({ admin, payload }) {
   }
 
   log.info('Item created', { sku: item.sku, admin: admin.telegram_id });
-  await syncCatalogToSheets();
+  queueStockFollowUp();
   return item;
 }
 
@@ -167,7 +168,7 @@ const EDITABLE = {
 };
 
 /**
- * Update an item. Note `stock` is deliberately not editable here — it can only
+ * Update an item. Note `stock` is deliberately not editable here - it can only
  * move through setStock/adjustStock so that every change lands in the ledger.
  */
 export async function updateItem({ admin, itemId, patch }) {
@@ -190,19 +191,19 @@ export async function updateItem({ admin, itemId, patch }) {
   if (!item) throw new AdminError('No such item.', 'ITEM_NOT_FOUND', 404);
 
   log.info('Item updated', { sku: item.sku, fields: Object.keys(patch), admin: admin.telegram_id });
-  await syncCatalogToSheets();
+  queueStockFollowUp();
   return item;
 }
 
 /**
- * Items are archived, never deleted — order history references them, and a
+ * Items are archived, never deleted - order history references them, and a
  * hard delete would blow a hole in past receipts.
  */
 export async function archiveItem({ admin, itemId }) {
   const item = await one('update items set is_active = false where id = $1 returning *', [itemId]);
   if (!item) throw new AdminError('No such item.', 'ITEM_NOT_FOUND', 404);
   log.info('Item archived', { sku: item.sku, admin: admin.telegram_id });
-  await syncCatalogToSheets();
+  queueStockFollowUp();
   return item;
 }
 
@@ -244,7 +245,7 @@ export async function setAdmin({ admin, targetTelegramId, isAdmin }) {
   const target = await one('select * from app_users where telegram_id = $1', [targetTelegramId]);
   if (!target) {
     throw new AdminError(
-      'That person has not opened the store yet — ask them to press Start on the bot first.',
+      'That person has not opened the store yet - ask them to press Start on the bot first.',
       'USER_NOT_FOUND', 404
     );
   }
@@ -282,7 +283,7 @@ export async function setBlocked({ admin, targetTelegramId, isBlocked }) {
 /**
  * Pull edits made in the spreadsheet back into the database.
  *
- * The sheet is normally a mirror — syncCatalogToSheets() overwrites it — but
+ * The sheet is normally a mirror - syncCatalogToSheets() overwrites it - but
  * the committee edits it anyway, because correcting a price in a spreadsheet
  * on the shelf is faster than opening the admin panel. This is that edit
  * finding its way home.
@@ -291,7 +292,7 @@ export async function setBlocked({ admin, targetTelegramId, isBlocked }) {
  * A row whose SKU is unknown is reported, never inserted: creating an item
  * needs a category and a considered price, and guessing either from a
  * half-typed row is how a shop ends up selling something for nothing.
- * Likewise a deleted row archives nothing — order history points at items,
+ * Likewise a deleted row archives nothing - order history points at items,
  * and rows go missing because somebody sorted the sheet, not because they
  * meant to withdraw a product.
  *
@@ -370,6 +371,7 @@ export async function importCatalogFromSheets({ admin }) {
           admin,
           count: row.stock,
           note: `Sheet edit (row ${row.row})`,
+          collate: false,
         });
         stocked.push({ sku: row.sku, from: item.stock, to: row.stock });
       } catch (err) {
@@ -381,8 +383,13 @@ export async function importCatalogFromSheets({ admin }) {
   }
 
   // One push at the end, not one per row: it restates the derived columns
-  // (Available, Low?, Updated At) that the edits have just invalidated.
+  // (Available, Low?, Updated At) that the edits have just invalidated, and
+  // puts back anything the importer refused to read. Awaited, because the
+  // admin who pressed the button is looking at the sheet.
   await syncCatalogToSheets();
+  // The ledger rows and the low-stock check ride along, so a restock typed
+  // into the spreadsheet is indistinguishable from one typed into the panel.
+  queueStockFollowUp();
 
   log.info('Catalogue imported from sheet', {
     changed: changed.length, stocked: stocked.length, skipped: skipped.length,
@@ -400,15 +407,10 @@ export async function importCatalogFromSheets({ admin }) {
   };
 }
 
-export async function syncCatalogToSheets() {
-  if (!sheets.sheetsEnabled()) return false;
-  try {
-    return await sheets.syncCatalog(await getCatalogForSheets());
-  } catch (err) {
-    log.error('Catalog sheet sync failed', { error: err.message });
-    return false;
-  }
-}
+// Re-exported so the routes keep one import for "the admin can do this".
+// The implementation lives with the rest of the collation, next to the order
+// sync and the low-stock alert it has to stay consistent with.
+export { syncCatalogToSheets };
 
 export default {
   setStock, adjustStock, bulkSetStock, listStockMovements,

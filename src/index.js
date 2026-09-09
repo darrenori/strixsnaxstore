@@ -68,7 +68,7 @@ app.use(express.json({ limit: '256kb' }));
 app.use(express.urlencoded({ extended: false, limit: '256kb' }));
 
 // ---------------------------------------------------------------------------
-// Health check — before auth so uptime pings do not need Telegram data.
+// Health check - before auth so uptime pings do not need Telegram data.
 // ---------------------------------------------------------------------------
 app.get('/healthz', async (req, res) => {
   // Touch the database so a health check actually means "can serve orders",
@@ -107,7 +107,7 @@ app.post('/telegram/webhook', async (req, res) => {
   }
 
   // Handle the update before answering. A serverless invocation can be frozen
-  // the moment its response is sent, which would cut the bot off mid-reply —
+  // the moment its response is sent, which would cut the bot off mid-reply -
   // the buyer presses /start and nothing ever arrives. Telegram allows up to
   // 60s, and this work is one query plus one sendMessage.
   try {
@@ -141,7 +141,7 @@ app.all('/api/cron/janitor', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// API — everything past this point needs a valid Telegram signature.
+// API - everything past this point needs a valid Telegram signature.
 // ---------------------------------------------------------------------------
 const apiLimiter = rateLimit({
   windowMs: 60_000,
@@ -156,7 +156,7 @@ const writeLimiter = rateLimit({
   limit: 20,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
-  // Key on the Telegram user, not the IP — a hall full of students shares one NAT.
+  // Key on the Telegram user, not the IP - a hall full of students shares one NAT.
   keyGenerator: (req) => String(req.user?.telegram_id ?? req.ip),
   // Reading your own order status is cheap; only the mutations need throttling.
   skip: (req) => req.method === 'GET',
@@ -240,7 +240,7 @@ async function main() {
   if (sheetsEnabled()) {
     ensureTabs().catch((err) => log.error('Sheets bootstrap failed', { error: err.message }));
   } else {
-    log.warn('Google Sheets is not configured — orders will not be collated');
+    log.warn('Google Sheets is not configured - orders will not be collated');
   }
 
   // Put stock held by abandoned checkouts back on the shelf, and keep the

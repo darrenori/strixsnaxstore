@@ -1,5 +1,5 @@
 /* ==========================================================================
-   STRIX Snax Store — Mini App
+   STRIX Snax Store - Mini App
    ========================================================================== */
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -57,7 +57,7 @@ img { max-width: 100%; display: block; }
 }
 
 /* --------------------------------------------------------------------------
-   The poster badge — red hexagon plate with a gold keyline
+   The poster badge - red hexagon plate with a gold keyline
    -------------------------------------------------------------------------- */
 .badge {
   position: relative;
@@ -145,25 +145,33 @@ img { max-width: 100%; display: block; }
 }
 .topbar__cart {
   position: relative;
-  font-size: 21px;
   justify-self: end;
   width: 44px;
   height: 44px;
   display: grid;
   place-items: center;
 }
+/* The trolley shifts down and left so the count sits in the corner beside it
+   rather than on top of it. Centred, the badge covered the basket itself and
+   the two read as one smudged glyph. */
+.topbar__glyph {
+  font-size: 20px;
+  line-height: 1;
+  transform: translate(-3px, 3px);
+}
 .topbar__count {
   position: absolute;
-  top: 3px;
-  right: 1px;
-  min-width: 19px;
-  height: 19px;
+  top: 1px;
+  right: 0;
+  min-width: 18px;
+  height: 18px;
   padding: 0 5px;
   border-radius: var(--r-pill);
   background: var(--red);
   color: #fff;
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 800;
+  line-height: 1;
   display: grid;
   place-items: center;
   border: 2px solid var(--cream);
@@ -234,7 +242,7 @@ img { max-width: 100%; display: block; }
 }
 
 /* --------------------------------------------------------------------------
-   Hero — the poster masthead, condensed for a phone
+   Hero - the poster masthead, condensed for a phone
    -------------------------------------------------------------------------- */
 .hero {
   margin: 0 calc(var(--gutter) * -1) 18px;
@@ -249,11 +257,14 @@ img { max-width: 100%; display: block; }
 }
 .hero__open {
   font-family: var(--font-display);
-  font-size: 15px;
-  color: var(--blue);
+  font-size: 16px;
+  color: var(--blue-deep);
   letter-spacing: .06em;
-  /* the chromatic offset on "24/7" in the poster */
-  text-shadow: 1.5px 1.5px 0 var(--red), -1.5px -1.5px 0 var(--sky);
+  /* The poster's chromatic offset, at a phone's size rather than a poster's.
+     At 1.5px on a 15px face the three colours overlapped into a smear and the
+     line could not be read at all; one crisp pixel of red keeps the effect
+     and leaves the letters legible. */
+  text-shadow: 1px 1px 0 var(--red);
 }
 .hero__points {
   display: flex;
@@ -294,6 +305,19 @@ img { max-width: 100%; display: block; }
 /* --------------------------------------------------------------------------
    Snax / Drinks switch
    -------------------------------------------------------------------------- */
+/* The pill sticks under the header, so it needs a bar of its own to sit on.
+   Sticking the pill alone left the page scrolling visibly through the gutters
+   either side of it and through the gap above it, which reads as the menu
+   tearing rather than as a control staying put. */
+.switchbar {
+  position: sticky;
+  top: var(--topbar-h);
+  z-index: 20;
+  margin: 0 calc(var(--gutter) * -1) 18px;
+  padding: 8px var(--gutter) 10px;
+  background: var(--bg);
+}
+
 .switch {
   display: flex;
   gap: 6px;
@@ -301,10 +325,6 @@ img { max-width: 100%; display: block; }
   background: var(--surface-alt);
   border: 2px solid var(--navy);
   border-radius: var(--r-pill);
-  margin-bottom: 18px;
-  position: sticky;
-  top: calc(var(--header-h) + 10px);
-  z-index: 20;
   box-shadow: var(--shadow-block);
 }
 .switch__btn {
@@ -320,7 +340,7 @@ img { max-width: 100%; display: block; }
 .switch__btn.is-active { background: var(--red); color: var(--cream); box-shadow: 0 2px 0 var(--red-ink); }
 
 /* --------------------------------------------------------------------------
-   Category block — the poster's coloured menu panels
+   Category block - the poster's coloured menu panels
    -------------------------------------------------------------------------- */
 .section { margin-bottom: 26px; }
 
@@ -378,13 +398,17 @@ img { max-width: 100%; display: block; }
 /* --------------------------------------------------------------------------
    Item row
    -------------------------------------------------------------------------- */
+/* Name and price on the first line, anything else beneath, and the button in
+   a column of its own down the right. Giving the button its own row made
+   every item three lines tall whether it had anything to say or not, which
+   turned a menu of two dozen things into a very long scroll. */
 .item {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 1fr auto auto;
   grid-template-areas:
-    'name  price'
-    'desc  desc'
-    'meta  action';
+    'name  price action'
+    'desc  desc  action'
+    'meta  meta  action';
   gap: 2px 12px;
   padding: 12px 0;
   border-bottom: 1px solid var(--border);
@@ -392,6 +416,8 @@ img { max-width: 100%; display: block; }
 }
 .item:last-child { border-bottom: none; }
 .item.is-out { opacity: .48; }
+/* Nothing under the name, so the row is one line and the button centres on it. */
+.item--tight { align-items: center; }
 
 .item__name {
   grid-area: name;
@@ -430,7 +456,12 @@ img { max-width: 100%; display: block; }
 .item__meta.is-low { color: var(--warn); }
 .item__meta.is-out { color: var(--danger); }
 
-.item__action { grid-area: action; justify-self: end; align-self: center; }
+.item__action {
+  grid-area: action;
+  justify-self: end;
+  align-self: center;
+  padding-left: 4px;
+}
 
 .tag {
   display: inline-block;
@@ -487,7 +518,7 @@ img { max-width: 100%; display: block; }
   font-size: 14px;
 }
 
-/* Grouped flavours — the poster's "NISSIN CUP NOODLES $1.90" plus its bullets */
+/* Grouped flavours - the poster's "NISSIN CUP NOODLES $1.90" plus its bullets */
 .group__head {
   display: flex;
   align-items: baseline;
@@ -525,7 +556,7 @@ img { max-width: 100%; display: block; }
 .section--panel .group__head { border-top-color: rgba(255, 255, 255, .28); }
 
 /* Flavour rows sitting under a group header get the poster's bullet, and stay
-   on one line — a bullet list should read as a list, not as stacked cards. */
+   on one line - a bullet list should read as a list, not as stacked cards. */
 .item--sub {
   grid-template-columns: 1fr auto;
   grid-template-areas: 'name action' 'meta action';
@@ -536,6 +567,7 @@ img { max-width: 100%; display: block; }
 }
 .item--sub .item__price,
 .item--sub .item__desc { display: none; }
+.item--sub .item__action { grid-area: action; }
 .item--sub .item__name {
   font-size: 14px;
   font-weight: 600;
@@ -552,7 +584,7 @@ img { max-width: 100%; display: block; }
 .section--panel .item--sub .item__name::before { color: var(--gold); }
 
 /* --------------------------------------------------------------------------
-   Special callout — the navy "SPECIAL" block from the poster
+   Special callout - the navy "SPECIAL" block from the poster
    -------------------------------------------------------------------------- */
 .special {
   background: var(--navy);
@@ -679,19 +711,29 @@ img { max-width: 100%; display: block; }
 /* --------------------------------------------------------------------------
    Cart
    -------------------------------------------------------------------------- */
+/* Name and money on the first line, the small print and the stepper together
+   on the second. The stepper used to sit on a third row of its own, leaving a
+   band of empty paper down the left of every line. */
 .cart-line {
   display: grid;
   grid-template-columns: 1fr auto;
+  align-items: center;
   gap: 4px 12px;
   padding: 12px 0;
   border-bottom: 1px solid var(--border);
 }
+/* The rule under the last line lands right on top of the totals' own border,
+   which reads as a rendering fault rather than as a divider. `:last-of-type`
+   alone does not catch it, because the last *div* in the card is the totals
+   block and not the line above it. */
+.cart-line:last-of-type,
+.cart-line:has(+ .totals) { border-bottom: none; }
 .cart-line__name { font-family: var(--font-menu); font-weight: 700; font-size: 14.5px; color: var(--heading); }
-.cart-line__sub  { font-size: 11.5px; color: var(--ink-faint); }
-.cart-line__total { font-family: var(--font-menu); font-weight: 800; color: var(--red); white-space: nowrap; }
+.cart-line__sub  { font-size: 11.5px; color: var(--ink-faint); align-self: center; }
+.cart-line__total { font-family: var(--font-menu); font-weight: 800; color: var(--red); white-space: nowrap; text-align: right; }
 .cart-line__ctrl { grid-column: 2; justify-self: end; }
 
-.totals { margin-top: 14px; padding-top: 14px; border-top: 3px double var(--border-strong); }
+.totals { margin-top: 10px; padding-top: 14px; border-top: 2px solid var(--border-strong); }
 .totals__row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 14px; }
 .totals__row--grand {
   font-family: var(--font-display);
@@ -761,21 +803,6 @@ img { max-width: 100%; display: block; }
   font-size: 11px;
   display: grid; place-items: center;
 }
-
-.dropzone {
-  border: 3px dashed var(--border-strong);
-  border-radius: var(--r-md);
-  padding: 26px 16px;
-  text-align: center;
-  background: var(--surface-alt);
-  transition: border-color .15s ease, background .15s ease;
-  cursor: pointer;
-}
-.dropzone:hover, .dropzone.is-over { border-color: var(--blue); background: var(--paper); }
-.dropzone__icon { font-size: 30px; margin-bottom: 6px; }
-.dropzone__label { font-weight: 800; font-size: 13.5px; color: var(--heading); }
-.dropzone__hint { font-size: 11.5px; color: var(--ink-faint); margin-top: 3px; }
-.dropzone__preview { max-height: 220px; margin: 0 auto; border-radius: var(--r-sm); object-fit: contain; }
 
 /* --------------------------------------------------------------------------
    Status pills
@@ -912,6 +939,8 @@ img { max-width: 100%; display: block; }
   padding: 11px 0;
   border-bottom: 1px solid var(--border);
 }
+/* The divider under the last row lands on the card's own edge. */
+.stock-row:last-child { border-bottom: none; padding-bottom: 2px; }
 .stock-row__name { font-family: var(--font-menu); font-weight: 700; font-size: 14px; color: var(--heading); }
 .stock-row__sub { font-size: 11px; color: var(--ink-faint); }
 .stock-row__ctrl { display: flex; align-items: center; gap: 6px; }
@@ -1051,7 +1080,7 @@ img { max-width: 100%; display: block; }
 .stack > * + * { margin-top: 10px; }
 
 /* ---------------------------------------------------------------------------
-   Disclosure — used on a rejected order to keep the "pay again" QR folded
+   Disclosure - used on a rejected order to keep the "pay again" QR folded
    away. It has to look deliberately closed, or a buyer taps it out of habit
    and pays a second time.
    --------------------------------------------------------------------------- */
@@ -1087,7 +1116,7 @@ details.card > :not(summary) { margin-top: 12px; }
 
 /* ---------------------------------------------------------------------------
    Collect-now callout. The buyer takes their snacks the moment the screenshot
-   is up, so this is the single most important line on the screen — it has to
+   is up, so this is the single most important line on the screen - it has to
    read as an instruction, not as a status.
    --------------------------------------------------------------------------- */
 .collect-now {

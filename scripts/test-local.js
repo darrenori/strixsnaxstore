@@ -10,8 +10,8 @@
  * faked with a stub. Pointing them at the live Supabase would mean testing
  * against the shop people are actually ordering from, so this spins up its own.
  *
- * PGlite is Postgres compiled to WASM — the same engine, the same plpgsql, the
- * same locking — running in this process with no server to install and no
+ * PGlite is Postgres compiled to WASM - the same engine, the same plpgsql, the
+ * same locking - running in this process with no server to install and no
  * Docker daemon to keep alive. Schema and seed are applied fresh each run, so
  * every suite starts from the same known shelf.
  */
@@ -34,6 +34,7 @@ const SUITES = {
   e2e: 'tests/e2e.integration.mjs',
   flows: 'tests/flows.integration.mjs',
   bot: 'tests/bot.integration.mjs',
+  sheets: 'tests/sheets.integration.mjs',
   vercel: 'tests/vercel.integration.mjs',
 };
 
@@ -60,20 +61,20 @@ async function freePort() {
 
 /**
  * A fresh database per suite. PGlite serves one connection at a time, so a
- * suite gets the socket to itself and hands it back before the next starts —
+ * suite gets the socket to itself and hands it back before the next starts -
  * which also means no suite can see another's leftovers.
  */
 async function runSuite(name) {
   // Deliberately no extensions. A managed host installs them into its own
   // schema, so anything the schema needs from one resolves locally and then
-  // fails in production — running bare here is what catches that.
+  // fails in production - running bare here is what catches that.
   const db = await PGlite.create();
   for (const file of ['db/schema.sql', 'db/seed.sql']) {
     // eslint-disable-next-line no-await-in-loop
     await db.exec(fs.readFileSync(path.join(root, file), 'utf8'));
   }
 
-  console.log(`\n${'='.repeat(72)}\n  ${name} — ${SUITES[name] ?? 'db/test-logic.sql'}\n${'='.repeat(72)}`);
+  console.log(`\n${'='.repeat(72)}\n  ${name} - ${SUITES[name] ?? 'db/test-logic.sql'}\n${'='.repeat(72)}`);
 
   // The SQL suite needs no server: it runs its assertions inside a transaction
   // and rolls back. Any failed assertion raises, which is what we catch.

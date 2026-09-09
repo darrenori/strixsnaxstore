@@ -1,5 +1,5 @@
 -- ============================================================================
--- STRIX Snax Store — menu seed (AY2026/2027)
+-- STRIX Snax Store - menu seed (AY2026/2027)
 -- Transcribed from the Blk B Lounge (snax) and Blk B Pantry (drinks) posters.
 -- Safe to re-run: everything is upserted on the natural key.
 -- ============================================================================
@@ -19,7 +19,7 @@ on conflict (slug) do update set
   accent = excluded.accent, sort_order = excluded.sort_order;
 
 -- ---------------------------------------------------------------------------
--- SNAX — Blk B Lounge
+-- SNAX - Blk B Lounge
 -- ---------------------------------------------------------------------------
 insert into items (category_id, sku, name, variant, description, price_cents, emoji,
                    is_special, is_top_pick, stock, low_stock_at, sort_order)
@@ -53,7 +53,7 @@ from (values
   ('lotte-pepero','LP-WHITE-COOKIE','Lotte Pepero','White Cookie',null,160,'🍫',false,false,18,4,20),
 
   -- ---------------------------------------------------------------------
-  -- DRINKS — Blk B Pantry
+  -- DRINKS - Blk B Pantry
   -- ---------------------------------------------------------------------
   ('under-1-deals','DR-POKKA-GREENTEA','Pokka Green Tea','',null,80,'🍵',false,false,24,5,10),
   ('under-1-deals','DR-MILO-PACKET',   'Milo Packets',   '',null,80,'🥤',false,false,24,5,20),

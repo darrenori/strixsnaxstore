@@ -12,7 +12,7 @@ const router = Router();
  * A long-running host does this at boot in launchBot(). A serverless
  * deployment has no boot: nothing runs until a request arrives, and the first
  * request can only arrive once Telegram already knows where to send it. That
- * is a chicken and egg, and this route is the way out of it — deploy, call
+ * is a chicken and egg, and this route is the way out of it - deploy, call
  * this once, and the bot is live.
  *
  * It shares MIGRATE_SECRET with the schema route: both are one-shot
@@ -66,7 +66,7 @@ router.post('/admin/telegram/setup', async (req, res) => {
     ]);
 
     if (!config.telegram.webhookSecret) {
-      log.warn('Webhook registered without a secret token — anyone can post updates');
+      log.warn('Webhook registered without a secret token - anyone can post updates');
     }
 
     return res.json({

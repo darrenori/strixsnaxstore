@@ -1,5 +1,5 @@
 -- ============================================================================
--- STRIX Snax Store — Postgres schema
+-- STRIX Snax Store - Postgres schema
 -- Applied by `npm run db:setup`, which is idempotent and safe to re-run.
 -- ============================================================================
 
@@ -70,13 +70,21 @@ create table if not exists items (
 create index if not exists items_category_idx on items(category_id);
 create index if not exists items_active_idx   on items(is_active) where is_active;
 
+-- When the admins were last told this line was nearly gone.
+--
+-- The alert fires on the crossing, not on the state: without a marker, every
+-- sale of an item already down to its last two would send the same message
+-- again, and a committee that gets fifteen identical alerts in an evening
+-- stops reading them. Restocking clears it, so the next fall alerts again.
+alter table items add column if not exists low_stock_alerted_at timestamptz;
+
 -- Anything not held by a live order is buyable.
 create or replace view items_public as
   select i.*, greatest(i.stock - i.reserved, 0) as available
   from items i;
 
 -- ---------------------------------------------------------------------------
--- Users (Telegram identities). We never store a password — Telegram is the IdP.
+-- Users (Telegram identities). We never store a password - Telegram is the IdP.
 -- ---------------------------------------------------------------------------
 create table if not exists app_users (
   id             uuid primary key default gen_random_uuid(),
@@ -129,6 +137,19 @@ create table if not exists orders (
 -- a second time, because by then the snacks are already in someone's bag.
 alter table orders add column if not exists stock_spent_at timestamptz;
 
+-- How the payment screenshot arrived. The buyer sends it to the bot in
+-- Telegram, so the app records which channel it came through, and when the
+-- Mini App last nudged them to send it. Both are for the humans reading the
+-- order: knowing a nudge went out five minutes ago is what stops an admin
+-- chasing someone who is already mid-upload.
+alter table orders add column if not exists proof_source text;
+alter table orders add column if not exists proof_requested_at timestamptz;
+
+-- The last row written into the Orders tab of the spreadsheet, so a status
+-- change refreshes the row it already has instead of hunting for it by code
+-- on every write.
+alter table orders add column if not exists sheet_row int;
+
 create index if not exists orders_user_idx    on orders(user_id, created_at desc);
 create index if not exists orders_status_idx  on orders(status, created_at desc);
 create index if not exists orders_pending_idx on orders(expires_at) where status = 'awaiting_payment';
@@ -153,7 +174,7 @@ create table if not exists order_items (
 create index if not exists order_items_order_idx on order_items(order_id);
 
 -- ---------------------------------------------------------------------------
--- Stock ledger — every movement is auditable
+-- Stock ledger - every movement is auditable
 -- ---------------------------------------------------------------------------
 create table if not exists stock_movements (
   id           uuid primary key default gen_random_uuid(),
@@ -169,6 +190,17 @@ create table if not exists stock_movements (
 
 create index if not exists stock_movements_item_idx on stock_movements(item_id, created_at desc);
 
+-- When this movement was copied into the spreadsheet's ledger tab.
+--
+-- The tab is append-only, so "write the rows for this order" run twice writes
+-- them twice, and a shop that sold two packets appears to have sold four. The
+-- stamp makes the copy a claim: a row is written exactly once, whichever of
+-- the several things that move stock happens to trigger the sync.
+alter table stock_movements add column if not exists sheeted_at timestamptz;
+
+create index if not exists stock_movements_unsheeted_idx
+  on stock_movements(created_at) where sheeted_at is null;
+
 -- ---------------------------------------------------------------------------
 -- Key/value store settings
 -- ---------------------------------------------------------------------------
@@ -180,7 +212,7 @@ create table if not exists settings (
 
 insert into settings(key, value) values
   ('store_open',   'true'::jsonb),
-  ('announcement', '"We are open 24/7 — Blk B Lounge & Blk B Pantry"'::jsonb),
+  ('announcement', '"We are open 24/7 - Blk B Lounge & Blk B Pantry"'::jsonb),
   -- How long an unpaid order holds its stock before the janitor releases it.
   ('order_expiry_minutes', '45'::jsonb)
 on conflict (key) do nothing;
@@ -206,7 +238,7 @@ create or replace function expire_stale_orders() returns int
 language plpgsql as $$ begin return 0; end $$;
 
 -- ============================================================================
--- create_order — the only way an order may be born.
+-- create_order - the only way an order may be born.
 -- Prices and stock are read from the table under a row lock, so a client can
 -- never dictate a price and two shoppers can never buy the same last packet.
 -- ============================================================================
@@ -248,7 +280,7 @@ begin
 
   -- Release abandoned checkouts before counting stock. A long-running host
   -- also sweeps on a timer, but doing it here means the shelf is correct at
-  -- the only moment it matters — someone trying to buy — even on a serverless
+  -- the only moment it matters - someone trying to buy - even on a serverless
   -- host with no background process at all.
   perform expire_stale_orders();
 
@@ -263,7 +295,7 @@ begin
 
   -- Built from gen_random_uuid(), which is core Postgres, rather than
   -- pgcrypto's gen_random_bytes(). Managed hosts install extensions into their
-  -- own schema — Supabase uses `extensions` — and this function pins
+  -- own schema - Supabase uses `extensions` - and this function pins
   -- search_path to public, so a pgcrypto call resolves on a plain database and
   -- then fails in production on the first order anyone tries to place.
   v_code := 'SNX-' || upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 5));
@@ -330,7 +362,7 @@ begin
 end $$;
 
 -- ============================================================================
--- settle_order_stock — the packets have physically left the shelf.
+-- settle_order_stock - the packets have physically left the shelf.
 --
 -- Turns the order's reservation into a real deduction and writes the ledger.
 -- Called when the buyer uploads their screenshot, because that is when they
@@ -375,7 +407,7 @@ begin
 end $$;
 
 -- ============================================================================
--- approve_order — admin verified the PayNow screenshot.
+-- approve_order - admin verified the PayNow screenshot.
 --
 -- By now the buyer has usually collected already, so this normally moves no
 -- stock at all. It still settles as a fallback: an admin can approve an order
@@ -415,11 +447,11 @@ begin
 end $$;
 
 -- ============================================================================
--- release_order — reject / cancel / expire.
+-- release_order - reject / cancel / expire.
 --
 -- Puts a hold back on the shelf, but only a hold. Once an order's stock has
 -- been spent the buyer has physically taken the snacks, so rejecting their
--- screenshot cannot restore anything — it records that the order was never
+-- screenshot cannot restore anything - it records that the order was never
 -- paid for. Crediting the shelf there would invent stock that is not on it.
 -- ============================================================================
 create or replace function release_order(
@@ -471,7 +503,7 @@ begin
 end $$;
 
 -- ============================================================================
--- rehold_order_stock — a rejected order is being re-submitted.
+-- rehold_order_stock - a rejected order is being re-submitted.
 --
 -- release_order put this order's stock back on the shelf when it was rejected,
 -- so the buyer's second screenshot has to take it off again. Without this the
@@ -504,7 +536,7 @@ begin
 
   -- Nor does one whose snacks are already gone. Rejecting that order returned
   -- nothing to the shelf, so a second screenshot has nothing to take back off
-  -- it — re-holding here would reserve stock the buyer already walked out with.
+  -- it - re-holding here would reserve stock the buyer already walked out with.
   if v_order.stock_spent_at is not null then
     return v_order;
   end if;
@@ -532,7 +564,7 @@ end $$;
 
 
 -- ============================================================================
--- adjust_stock — admin stock-take. Always writes a ledger row.
+-- adjust_stock - admin stock-take. Always writes a ledger row.
 -- ============================================================================
 create or replace function adjust_stock(
   p_item_id uuid,
@@ -586,7 +618,7 @@ begin
 end $$;
 
 -- ============================================================================
--- expire_stale_orders — call from the bot's janitor loop or a Supabase cron.
+-- expire_stale_orders - call from the bot's janitor loop or a Supabase cron.
 -- ============================================================================
 create or replace function expire_stale_orders() returns int
 language plpgsql
@@ -602,7 +634,7 @@ begin
     where status = 'awaiting_payment' and expires_at < now()
     limit 100
   loop
-    perform release_order(v_id, null, 'cancelled', 'Expired — no payment received in time');
+    perform release_order(v_id, null, 'cancelled', 'Expired - no payment received in time');
     v_n := v_n + 1;
   end loop;
   return v_n;

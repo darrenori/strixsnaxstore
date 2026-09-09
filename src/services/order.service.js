@@ -1,6 +1,6 @@
 import { query, one, rpc, transaction, parseDbError } from '../lib/db.js';
 import { createPaymentQr } from '../lib/paynow.js';
-import * as sheets from '../lib/sheets.js';
+import { queueOrderSync, queueStockFollowUp, syncOrderToSheets } from './collation.service.js';
 import log from '../lib/logger.js';
 
 export class OrderError extends Error {
@@ -14,8 +14,9 @@ export class OrderError extends Error {
 
 const ORDER_COLUMNS = `
   id, code, user_id, telegram_id, buyer_name, status, subtotal_cents, total_cents,
-  collection_points, note, payment_proof_id, payment_ref, reviewed_by, reviewed_at,
-  review_note, sheet_synced_at, expires_at, stock_spent_at, created_at, updated_at
+  collection_points, note, payment_proof_id, payment_ref, proof_source,
+  proof_requested_at, reviewed_by, reviewed_at, review_note, sheet_synced_at,
+  expires_at, stock_spent_at, created_at, updated_at
 `;
 
 function toPublicOrder(order, items = []) {
@@ -31,7 +32,12 @@ function toPublicOrder(order, items = []) {
     note: order.note ?? null,
     paymentRef: order.payment_ref ?? null,
     hasProof: Boolean(order.payment_proof_id),
-    // The snacks are the buyer's as soon as this is set — verification happens
+    proofSource: order.proof_source ?? null,
+    // When the bot last messaged this buyer asking for their screenshot. The
+    // payment screen shows it, so pressing the button twice reads as "already
+    // sent, go and look" rather than as nothing having happened.
+    proofRequestedAt: order.proof_requested_at ?? null,
+    // The snacks are the buyer's as soon as this is set - verification happens
     // afterwards and does not gate collection.
     collectNow: Boolean(order.stock_spent_at),
     verified: order.status === 'paid' || order.status === 'collected',
@@ -55,7 +61,7 @@ const loadItems = (orderId) =>
   query('select * from order_items where order_id = $1 order by created_at', [orderId]);
 
 /**
- * Place an order. The client sends item ids and quantities only — never a
+ * Place an order. The client sends item ids and quantities only - never a
  * price and never a total. Everything monetary is recomputed inside the
  * create_order SQL function under a row lock, so a tampered request just
  * produces a correctly-priced order.
@@ -88,6 +94,13 @@ export async function placeOrder({ user, buyerName, note, cart }) {
   });
 
   log.info('Order placed', { code: order.code, total: order.total_cents, user: user.telegram_id });
+
+  // The sheet gets the order now, not when somebody eventually verifies it.
+  // Reserving stock has also just cut what everyone else can buy, so the
+  // stock columns and the low-stock alert are re-derived from the same event.
+  queueOrderSync(order.id);
+  queueStockFollowUp();
+
   return { order: toPublicOrder(order, items), payment: qr };
 }
 
@@ -99,7 +112,7 @@ export async function getOrder(orderId, { userId = null } = {}) {
   return toPublicOrder(order, await loadItems(order.id));
 }
 
-/** The order plus a fresh payment QR — used by the "pay now" screen. */
+/** The order plus a fresh payment QR - used by the "pay now" screen. */
 export async function getOrderWithPayment(orderId, { userId = null } = {}) {
   const order = await getOrder(orderId, { userId });
   const payment = await createPaymentQr({
@@ -128,12 +141,14 @@ export async function listUserOrders(userId, { limit = 25 } = {}) {
 /**
  * Store the uploaded PayNow screenshot and move the order into the review
  * queue. Only the order's own owner may do this, and only while it is still
- * waiting — an approved order can never be re-opened by the buyer.
+ * waiting - an approved order can never be re-opened by the buyer.
  *
  * The insert and the status change go in one transaction so an order can
  * never end up flagged as having a proof that was not actually stored.
  */
-export async function attachPaymentProof({ orderId, user, bytes, mimeType, paymentRef }) {
+export async function attachPaymentProof({
+  orderId, user, bytes, mimeType, paymentRef, source = 'app',
+}) {
   const order = await one(
     `select ${ORDER_COLUMNS} from orders where id = $1 and user_id = $2`,
     [orderId, user.id]
@@ -164,18 +179,18 @@ export async function attachPaymentProof({ orderId, user, bytes, mimeType, payme
       }
 
       // The buyer collects now rather than waiting for an admin, so this is
-      // the moment the packets leave the shelf. Debiting here — not at
-      // approval — keeps the stock count matching what is physically there,
+      // the moment the packets leave the shelf. Debiting here - not at
+      // approval - keeps the stock count matching what is physically there,
       // which is what everyone else's availability is computed from.
       await client.query('select settle_order_stock($1, $2)', [order.id, user.id]);
 
       const { rows: [row] } = await client.query(
         `update orders
-            set payment_proof_id = $1, payment_ref = $2,
+            set payment_proof_id = $1, payment_ref = $2, proof_source = $3,
                 status = 'pending_review', review_note = null
-          where id = $3
+          where id = $4
           returning ${ORDER_COLUMNS}`,
-        [proof.id, paymentRef ?? order.code, order.id]
+        [proof.id, paymentRef ?? order.code, source, order.id]
       );
       return row;
     });
@@ -185,8 +200,57 @@ export async function attachPaymentProof({ orderId, user, bytes, mimeType, payme
     throw err;
   }
 
-  log.info('Payment proof attached', { code: updated.code, bytes: bytes.length });
+  log.info('Payment proof attached', { code: updated.code, bytes: bytes.length, source });
+
+  // The packets have physically left the shelf, so this is the moment the
+  // spreadsheet's stock column and the admins' low-stock alert both hang on.
+  queueOrderSync(updated.id);
+  queueStockFollowUp();
+
   return toPublicOrder(updated, await loadItems(updated.id));
+}
+
+/**
+ * Note that the bot has just asked this buyer for their screenshot.
+ *
+ * Recorded rather than merely sent so the admin queue can tell "nudged two
+ * minutes ago" from "nobody has ever asked them", and so the Mini App can say
+ * something true when the button is pressed a second time.
+ */
+export async function markProofRequested(orderId) {
+  await query('update orders set proof_requested_at = now() where id = $1', [orderId]);
+}
+
+/**
+ * The buyer's orders that are still waiting on a payment screenshot.
+ *
+ * Used by the bot when a photo arrives with nothing to say which order it is
+ * for. A rejected order counts: its screenshot was refused, so the next one
+ * belongs to it.
+ */
+export async function listOrdersAwaitingProof(userId, { limit = 5 } = {}) {
+  const orders = await query(
+    `select ${ORDER_COLUMNS} from orders
+      where user_id = $1 and status in ('awaiting_payment', 'rejected')
+      order by created_at desc limit $2`,
+    [userId, limit]
+  );
+  if (orders.length === 0) return [];
+  const items = await query(
+    'select * from order_items where order_id = any($1::uuid[])',
+    [orders.map((o) => o.id)]
+  );
+  return orders.map((o) => toPublicOrder(o, items.filter((i) => i.order_id === o.id)));
+}
+
+/** One of the buyer's orders, found by its human-readable code. */
+export async function getOrderByCode(code, { userId = null } = {}) {
+  const order = userId
+    ? await one(`select ${ORDER_COLUMNS} from orders where code = $1 and user_id = $2`,
+      [code, userId])
+    : await one(`select ${ORDER_COLUMNS} from orders where code = $1`, [code]);
+  if (!order) return null;
+  return toPublicOrder(order, await loadItems(order.id));
 }
 
 /** Stream one screenshot back to an admin. Returns null when there is none. */
@@ -213,7 +277,7 @@ export async function cancelOrder({ orderId, user }) {
   // and quietly erase what they owe.
   if (order.status !== 'awaiting_payment' || order.stock_spent_at) {
     throw new OrderError(
-      'That order can no longer be cancelled — the items have been collected.',
+      'That order can no longer be cancelled: the items have been collected.',
       'ORDER_NOT_CANCELLABLE', 409
     );
   }
@@ -227,6 +291,11 @@ export async function cancelOrder({ orderId, user }) {
       friendly?.code ?? 'CANCEL_FAILED', 409
     );
   }
+
+  // The hold is off, so the shelf has more on it than it did a second ago.
+  queueOrderSync(orderId);
+  queueStockFollowUp();
+
   return getOrder(orderId, { userId: user.id });
 }
 
@@ -262,37 +331,6 @@ export async function listOrders({ status = null, limit = 60 } = {}) {
   }));
 }
 
-/** Push a paid order into the Google Sheet. Never blocks the approval itself. */
-async function collateToSheets(order, admin) {
-  const [items, buyer] = await Promise.all([
-    query(
-      `select oi.*, c.name as category_name
-         from order_items oi
-         left join items i on i.id = oi.item_id
-         left join categories c on c.id = i.category_id
-        where oi.order_id = $1`,
-      [order.id]
-    ),
-    one('select username from app_users where id = $1', [order.user_id]),
-  ]);
-
-  const ok = await sheets.recordOrder({
-    order: {
-      ...order,
-      reviewer_name: admin
-        ? [admin.first_name, admin.last_name].filter(Boolean).join(' ') || admin.username
-        : '',
-    },
-    items,
-    user: buyer,
-  });
-
-  if (ok) {
-    await query('update orders set sheet_synced_at = now() where id = $1', [order.id]);
-  }
-  return ok;
-}
-
 export async function approveOrder({ orderId, admin, note }) {
   let order;
   try {
@@ -306,7 +344,16 @@ export async function approveOrder({ orderId, admin, note }) {
   }
 
   log.info('Order approved', { code: order.code, admin: admin.telegram_id });
-  await collateToSheets(order, admin);
+
+  // Awaited, not queued: an admin who has just pressed Approve is entitled to
+  // find that row in the spreadsheet a moment later, and this is the one place
+  // where somebody is actually watching for it.
+  await syncOrderToSheets(orderId).catch((err) =>
+    log.error('Order sheet sync failed', { code: order.code, error: err.message }));
+
+  // Approving an order that never had a screenshot settles its stock here.
+  queueStockFollowUp();
+
   return toPublicOrder(order, await loadItems(order.id));
 }
 
@@ -322,6 +369,11 @@ export async function rejectOrder({ orderId, admin, note, status = 'rejected' })
     );
   }
   log.info('Order rejected', { code: order.code, admin: admin.telegram_id, status });
+
+  await syncOrderToSheets(orderId).catch((err) =>
+    log.error('Order sheet sync failed', { code: order.code, error: err.message }));
+  queueStockFollowUp();
+
   return toPublicOrder(order, await loadItems(order.id));
 }
 
@@ -342,12 +394,27 @@ export async function getStats() {
   };
 }
 
-/** Release stock held by orders nobody ever paid for. */
+/**
+ * Release stock held by orders nobody ever paid for.
+ *
+ * The ids are read first so the spreadsheet can be told which rows just went
+ * to `cancelled`. An order that gets paid in the gap between the two queries
+ * is simply re-synced with whatever status it really ended up with, so the
+ * race costs one redundant write and nothing else.
+ */
 export async function expireStaleOrders() {
   try {
+    const stale = await query(
+      `select id from orders
+        where status = 'awaiting_payment' and expires_at < now() limit 100`
+    );
     const row = await one('select expire_stale_orders() as n');
     const n = Number(row?.n ?? 0);
-    if (n > 0) log.info('Expired stale orders', { count: n });
+    if (n > 0) {
+      log.info('Expired stale orders', { count: n });
+      for (const o of stale) queueOrderSync(o.id);
+      queueStockFollowUp();
+    }
     return n;
   } catch (err) {
     log.error('expire_stale_orders failed', { error: err.message });
@@ -369,7 +436,8 @@ export async function pruneOldProofs(days = 60) {
 }
 
 export default {
-  placeOrder, getOrder, getOrderWithPayment, listUserOrders, attachPaymentProof,
+  placeOrder, getOrder, getOrderByCode, getOrderWithPayment, listUserOrders,
+  attachPaymentProof, markProofRequested, listOrdersAwaitingProof,
   getProof, cancelOrder, listOrders, approveOrder, rejectOrder,
   getStats, expireStaleOrders, pruneOldProofs, OrderError,
 };

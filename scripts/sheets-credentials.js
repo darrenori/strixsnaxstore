@@ -53,7 +53,7 @@ try {
 if (key.type !== 'service_account') {
   die(
     `That file has type "${key.type ?? 'none'}", not "service_account".`,
-    'An OAuth client-secret file will not work here — the server has no',
+    'An OAuth client-secret file will not work here - the server has no',
     'browser to consent in. Create a service account key instead.'
   );
 }
@@ -63,7 +63,7 @@ if (!key.client_email || !key.private_key) {
 
 // --- merge into .env --------------------------------------------------------
 if (!fs.existsSync(envPath)) {
-  die('No .env yet — run `npm run setup` first, then come back to this.');
+  die('No .env yet - run `npm run setup` first, then come back to this.');
 }
 
 const vars = {
@@ -103,7 +103,7 @@ if (sheetId) {
   console.log(`Spreadsheet already set: ${dim(sheetId)}`);
   console.log(`Check it works:  ${b('npm run sheets:sync')}\n`);
 } else {
-  console.log(`${b('Next:')} create the spreadsheet and share it with yourself —\n`);
+  console.log(`${b('Next:')} create the spreadsheet and share it with yourself -\n`);
   console.log(`  ${b('npm run sheets:bootstrap -- you@gmail.com')}\n`);
   console.log(dim('  Use the Google account you want to open the sheet with.\n'));
 }

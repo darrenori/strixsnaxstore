@@ -1,7 +1,11 @@
 import * as tg from './tg.js';
 import api from './api.js';
-import { state, subscribe, emit, navigate, cartCount, reconcileCart } from './store.js';
-import { toast, el } from './ui.js';
+import {
+  state, subscribe, emit, navigate, cartCount, reconcileCart, invalidateAdminSummary,
+  cachedCatalog, cacheCatalog, refreshCatalog,
+} from './store.js';
+import { toast, el, setAdminBadge } from './ui.js';
+import { applyCartChange, resetPatchers } from './patch.js';
 import renderShop from './views/shop.js';
 import renderCart from './views/cart.js';
 import renderPayment, { stopCountdown } from './views/payment.js';
@@ -10,30 +14,6 @@ import renderAdmin from './views/admin.js';
 
 const viewRoot = document.getElementById('view');
 const splash = document.getElementById('splash');
-
-const CATALOG_KEY = 'strix.catalog.v1';
-
-/**
- * The last catalogue this device saw.
- *
- * The shelf holds the same two dozen items from one visit to the next, so
- * making the shopper watch a splash screen while we confirm that over the
- * network buys nothing. We draw the cached menu at once and correct it a
- * moment later. Prices shown from cache are advisory in any case — the server
- * recomputes every cent at checkout, so a stale one cannot be paid.
- */
-function cachedCatalog() {
-  try {
-    const raw = JSON.parse(localStorage.getItem(CATALOG_KEY) ?? 'null');
-    return raw && Array.isArray(raw.categories) ? raw : null;
-  } catch {
-    return null;
-  }
-}
-
-function cacheCatalog(catalog) {
-  try { localStorage.setItem(CATALOG_KEY, JSON.stringify(catalog)); } catch { /* private mode */ }
-}
 
 /**
  * Where "back" goes from each screen. Telegram shows its own back button, so
@@ -47,6 +27,7 @@ const BACK_TO = {
 };
 
 function currentView() {
+  resetPatchers();
   switch (state.route.name) {
     case 'cart':    return renderCart();
     case 'payment': return renderPayment(state.route.params);
@@ -59,12 +40,21 @@ function currentView() {
 
 let lastRouteKey = '';
 
-// Once the app has said it cannot start, nothing may paint over that — the
+// Once the app has said it cannot start, nothing may paint over that: the
 // visibility listener would otherwise redraw a shop the shopper cannot use.
 let bootFailed = false;
 
-function render() {
+function render(detail = { scope: 'all' }) {
   if (bootFailed) return;
+
+  // A quantity change the visible screen can absorb itself. Rebuilding the
+  // whole shop for one tap is the difference between the app feeling instant
+  // and feeling stuck.
+  if (detail.scope === 'cart' && applyCartChange(detail)) {
+    paintChrome();
+    return;
+  }
+
   const routeKey = `${state.route.name}:${JSON.stringify(state.route.params ?? {})}`;
   const routeChanged = routeKey !== lastRouteKey;
 
@@ -81,11 +71,18 @@ function render() {
   paintChrome();
 }
 
+// Telegram's buttons live on the other side of a postMessage bridge, so
+// setting them costs far more than a DOM write. Remembering what we last asked
+// for keeps a tap on "+" from re-issuing the same three commands.
+let lastMainButton = '';
+let lastBackTarget = '';
+
 function paintChrome() {
   // --- cart badge ----------------------------------------------------------
   const count = cartCount();
   const badge = document.getElementById('cartCount');
-  badge.textContent = String(count);
+  const label = String(count);
+  if (badge.textContent !== label) badge.textContent = label;
   badge.hidden = count === 0;
 
   // --- bottom tabs ---------------------------------------------------------
@@ -100,26 +97,31 @@ function paintChrome() {
   if (adminTab) adminTab.hidden = !state.me?.isAdmin;
 
   // --- back button ---------------------------------------------------------
-  const target = BACK_TO[state.route.name];
-  const fallbackBack = document.getElementById('backBtn');
-
-  if (target) {
-    const goBack = () => navigate(target);
-    // Prefer Telegram's native back button; fall back to our own chevron.
-    if (tg.showBackButton(goBack)) fallbackBack.hidden = true;
-    else { fallbackBack.hidden = false; fallbackBack.onclick = goBack; }
-  } else {
-    tg.hideBackButton();
-    fallbackBack.hidden = true;
+  const target = BACK_TO[state.route.name] ?? '';
+  if (target !== lastBackTarget) {
+    lastBackTarget = target;
+    const fallbackBack = document.getElementById('backBtn');
+    if (target) {
+      const goBack = () => navigate(target);
+      // Prefer Telegram's native back button; fall back to our own chevron.
+      if (tg.showBackButton(goBack)) fallbackBack.hidden = true;
+      else { fallbackBack.hidden = false; fallbackBack.onclick = goBack; }
+    } else {
+      tg.hideBackButton();
+      fallbackBack.hidden = true;
+    }
   }
 
   // --- Telegram main button ------------------------------------------------
   // The cart screen has its own in-page submit, so the main button is only
   // used as a shortcut into the cart from the shop.
-  if (state.route.name === 'shop' && count > 0) {
-    tg.showMainButton(`VIEW CART · ${count} ITEM${count > 1 ? 'S' : ''}`, () => navigate('cart'));
-  } else {
-    tg.hideMainButton();
+  const mainLabel = state.route.name === 'shop' && count > 0
+    ? `VIEW CART · ${count} ITEM${count > 1 ? 'S' : ''}`
+    : '';
+  if (mainLabel !== lastMainButton) {
+    lastMainButton = mainLabel;
+    if (mainLabel) tg.showMainButton(mainLabel, () => navigate('cart'));
+    else tg.hideMainButton();
   }
 }
 
@@ -134,6 +136,9 @@ document.getElementById('cartBtn').addEventListener('click', () => {
 for (const tab of document.querySelectorAll('.tab')) {
   tab.addEventListener('click', () => {
     tg.haptic('select');
+    // Coming back to the admin tab should show current numbers, not the ones
+    // cached when it was last open.
+    if (tab.dataset.tab === 'admin' && state.route.name !== 'admin') invalidateAdminSummary();
     navigate(tab.dataset.tab);
   });
 }
@@ -208,29 +213,27 @@ async function boot() {
     if (me.isAdmin) refreshAdminBadge();
   } catch (err) {
     // A signature problem stops the shopper ordering at all, so it has to be
-    // said plainly. A network blip with a cached menu does not — leave the
+    // said plainly. A network blip with a cached menu does not: leave the
     // shop up and mention it, rather than replacing a usable screen.
     const fatal = !tg.inTelegram || STALE_SESSION.has(err.code) || !state.catalog;
     if (fatal) showBootError(err);
-    else toast('Offline — showing the last menu you saw', 'error');
+    else toast('Offline, showing the last menu you saw', 'error');
   }
 }
 
-/** Keep the ☰ badge honest without polling hard. */
+/** Keep the admin badge honest without polling hard. */
 async function refreshAdminBadge() {
   try {
     const summary = await api.adminSummary();
-    const badge = document.getElementById('adminBadge');
-    if (badge) {
-      badge.textContent = String(summary.stats.pendingReview);
-      badge.hidden = summary.stats.pendingReview === 0;
-    }
+    state.adminSummary = summary;
+    state.adminSummaryAt = Date.now();
+    setAdminBadge(summary.stats.pendingReview);
   } catch { /* the admin tab will surface any real problem */ }
 }
 
 /**
  * A signature failure almost always means the session Telegram handed this
- * page is stale — the bot token changed, or the app was reopened from a very
+ * page is stale: the bot token changed, or the app was reopened from a very
  * old message. Reopening mints a fresh one, so say that rather than showing
  * the shopper a cryptographic detail they cannot act on.
  */
@@ -255,7 +258,7 @@ function showBootError(err) {
         outsideTelegram
           ? 'This store runs inside Telegram so it can verify who you are. Search for the STRIX Snax Store bot and press Start.'
           : stale
-            ? 'Close this window and open the store again from the bot — reloading here will not fix it, because the sign-in came with the window.'
+            ? 'Close this window and open the store again from the bot. Reloading here will not fix it, because the sign-in came with the window.'
             : err.message),
       // Reloading re-runs the page with the same stale session, so it would
       // just fail again. Only offer it when a retry can actually work.
@@ -278,18 +281,27 @@ function showBootError(err) {
   bootFailed = true;
 }
 
-// Refresh the catalogue when the app comes back to the foreground, so a
-// shopper who left the tab open does not add something that sold out.
+/**
+ * Refresh the catalogue when the app comes back to the foreground, so a
+ * shopper who left the tab open does not add something that sold out.
+ *
+ * Rate-limited, because Telegram fires this every time the keyboard opens or
+ * a native dialog closes, and a full catalogue fetch plus a redraw on each of
+ * those is felt on a phone.
+ */
+const FOREGROUND_REFRESH_MS = 30_000;
+let lastForegroundFetch = 0;
+
 document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState !== 'visible' || !state.catalog) return;
-  try {
-    const catalog = await api.catalog();
-    state.catalog = catalog;
-    state.store = catalog.store;
-    reconcileCart();
-    emit();
-    if (state.me?.isAdmin) refreshAdminBadge();
-  } catch { /* offline; keep what we have */ }
+  if (Date.now() - lastForegroundFetch < FOREGROUND_REFRESH_MS) return;
+  lastForegroundFetch = Date.now();
+  if (!(await refreshCatalog())) return;      // offline; keep what we have
+  reconcileCart();
+  // Only the shop draws from the catalogue; redrawing an admin form or a
+  // half-filled checkout underneath the shopper would be worse than stale.
+  if (state.route.name === 'shop') emit();
+  if (state.me?.isAdmin) refreshAdminBadge();
 });
 
 boot();

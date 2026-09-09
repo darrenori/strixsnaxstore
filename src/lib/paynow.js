@@ -4,7 +4,7 @@ import config from '../config.js';
 /**
  * PayNow QR generation (EMVCo / SGQR).
  *
- * A static QR — the one printed on the poster — makes the buyer type the
+ * A static QR - the one printed on the poster - makes the buyer type the
  * amount themselves, which is exactly where "I paid $1.20 instead of $12.00"
  * mistakes come from. Building the payload ourselves lets us lock the amount
  * and stamp the order code as the bill reference, so the screenshot an admin
@@ -25,7 +25,7 @@ function tlv(id, value) {
 }
 
 /**
- * CRC-16/CCITT-FALSE — poly 0x1021, init 0xFFFF, no reflection, no final xor.
+ * CRC-16/CCITT-FALSE - poly 0x1021, init 0xFFFF, no reflection, no final xor.
  * The EMVCo spec computes it across the whole payload including the "6304"
  * header of the CRC field itself.
  */
@@ -74,7 +74,7 @@ export function buildPayNowPayload({ amountCents, reference, expiresAt } = {}) {
   const isUen = proxyType.toLowerCase() === 'uen';
   const proxy = isUen ? String(proxyValue).toUpperCase().trim() : normaliseMobile(proxyValue);
 
-  // Tag 26 — the PayNow merchant account template.
+  // Tag 26 - the PayNow merchant account template.
   let account =
     tlv('00', 'SG.PAYNOW') +
     tlv('01', isUen ? '2' : '0') +
@@ -150,7 +150,7 @@ export async function createPaymentQr({ amountCents, reference, expiresAt }) {
     amountEditable: config.paynow.amountEditable,
     note: config.paynow.amountEditable
       ? 'Check the amount before you confirm in your bank app.'
-      : 'The amount is locked — just confirm in your bank app.',
+      : 'The amount is locked, so just confirm in your bank app.',
   };
 }
 

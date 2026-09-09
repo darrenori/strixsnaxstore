@@ -1,5 +1,5 @@
 /* ==========================================================================
-   STRIX Snax Store — design tokens
+   STRIX Snax Store - design tokens
    Lifted straight off the AY2026/2027 posters: butter-cream ground, the red
    badge, navy "SPECIAL" block, sky-blue menu panels and the gold checkerboard.
    ========================================================================== */
@@ -72,6 +72,10 @@
 
   --gutter: 16px;
   --header-h: 56px;
+  /* The checker strip, the bar itself and its rule. Anything that sticks
+     underneath the header has to clear all three or the page scrolls through
+     the gap. */
+  --topbar-h: calc(var(--header-h) + 12px);
   --tabbar-h: calc(60px + env(safe-area-inset-bottom, 0px));
 
   /* The gold/cream checkerboard from the top of both posters. */

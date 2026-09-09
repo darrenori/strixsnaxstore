@@ -4,7 +4,7 @@
  *
  *   npm run sheets:link -- "https://docs.google.com/spreadsheets/d/<id>/edit"
  *
- * The other path — `sheets:bootstrap` — has the service account create the
+ * The other path - `sheets:bootstrap` - has the service account create the
  * file, which fails on most projects because a service account has no Drive
  * storage quota of its own. Making the sheet yourself and sharing it with the
  * service account as an Editor avoids that entirely, and leaves the file in
@@ -121,7 +121,7 @@ try {
   if (status === 404) {
     die(
       'No spreadsheet with that id.',
-      'Check the URL you copied — it must be a Sheets file, not a Drive folder.'
+      'Check the URL you copied - it must be a Sheets file, not a Drive folder.'
     );
   }
   die('Could not read that spreadsheet.', message);
@@ -144,7 +144,7 @@ if (fs.existsSync(envPath)) {
   fs.writeFileSync(envPath, after, { mode: 0o600 });
   console.log(`${ok('\u2713')} GOOGLE_SHEETS_ID and SHEETS_ENABLED written to .env\n`);
 } else {
-  console.log(`${bad('!')} No .env found — set GOOGLE_SHEETS_ID=${spreadsheetId} yourself.\n`);
+  console.log(`${bad('!')} No .env found - set GOOGLE_SHEETS_ID=${spreadsheetId} yourself.\n`);
 }
 
 // config.js reads the environment as it is imported, so this has to happen

@@ -2,7 +2,7 @@ import { initData } from './tg.js';
 
 /**
  * Every request carries the Telegram signature. There is no token to store and
- * nothing to refresh — if Telegram trusts the session, so does the server.
+ * nothing to refresh - if Telegram trusts the session, so does the server.
  */
 async function request(path, { method = 'GET', body, formData, signal } = {}) {
   const headers = { 'X-Telegram-Init-Data': initData() };
@@ -55,7 +55,9 @@ export const api = {
   myOrders:      () => request('/orders'),
   order:         (id) => request(`/orders/${id}`),
   cancelOrder:   (id) => request(`/orders/${id}/cancel`, { method: 'POST' }),
-  uploadProof:   (id, formData) => request(`/orders/${id}/proof`, { method: 'POST', formData }),
+  // Ask the bot to collect the payment screenshot in the Telegram chat. The
+  // app itself never takes the file, see views/payment.js.
+  requestProof:  (id) => request(`/orders/${id}/request-proof`, { method: 'POST' }),
 
   // --- admin ---------------------------------------------------------------
   adminSummary:  () => request('/admin/summary'),

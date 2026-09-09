@@ -5,8 +5,8 @@ import log from './logger.js';
 /**
  * Postgres access layer.
  *
- * The business rules that matter — pricing, stock reservation, approval,
- * release — live in SQL functions (see db/schema.sql), so this module stays
+ * The business rules that matter - pricing, stock reservation, approval,
+ * release - live in SQL functions (see db/schema.sql), so this module stays
  * deliberately thin: a pool, a query helper, and translation of the errors
  * those functions raise into something the API can show a shopper.
  */
@@ -60,7 +60,7 @@ export async function rpc(fn, params = []) {
 
 /**
  * Run several statements as one unit. Used where two writes must not be able
- * to half-apply — attaching a payment proof, for instance.
+ * to half-apply - attaching a payment proof, for instance.
  */
 export async function transaction(fn) {
   const client = await pool.connect();
@@ -101,7 +101,7 @@ export function parseDbError(error) {
       : `Only ${parts[1]} left of ${parts[0] || 'that item'}.`,
     ORDER_NOT_FOUND:      'That order does not exist.',
     ORDER_NOT_REVIEWABLE: 'That order has already been dealt with.',
-    ORDER_ALREADY_PAID:   'That order is already paid — it cannot be released.',
+    ORDER_ALREADY_PAID:   'That order is already paid, so it cannot be released.',
     BAD_RELEASE_STATUS:   'Invalid order transition.',
     NEGATIVE_STOCK:       'Stock cannot go below zero.',
   };

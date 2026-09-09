@@ -18,7 +18,7 @@ import { TABS } from '../src/lib/sheets.js';
 
 const envPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '.env');
 
-/** Write the new id straight into .env — one less thing to copy by hand. */
+/** Write the new id straight into .env - one less thing to copy by hand. */
 function saveSheetId(id) {
   if (!fs.existsSync(envPath)) return false;
   const before = fs.readFileSync(envPath, 'utf8');
@@ -58,7 +58,7 @@ try {
 
   const created = await sheets.spreadsheets.create({
     requestBody: {
-      properties: { title: `STRIX Snax Store — Collation ${new Date().getFullYear()}` },
+      properties: { title: `STRIX Snax Store - Collation ${new Date().getFullYear()}` },
       sheets: tabs.map((tab, index) => ({
         properties: {
           title: tab.title,
@@ -132,7 +132,7 @@ try {
     });
     console.log(`🔗 Shared with ${shareWith}`);
   } else {
-    console.log('ℹ️  No email given — run again with your address to get edit access:');
+    console.log('ℹ️  No email given - run again with your address to get edit access:');
     console.log('   npm run sheets:bootstrap -- you@gmail.com');
   }
 
@@ -144,7 +144,7 @@ try {
     console.log('   Restart the server, then use SYNC MENU TO SHEET in the admin tab.\n');
   } else {
     console.log(`   GOOGLE_SHEETS_ID=${spreadsheetId}\n`);
-    console.log('   No .env found — put that id in one and restart the server.\n');
+    console.log('   No .env found - put that id in one and restart the server.\n');
   }
 } catch (err) {
   console.error('\n❌ Could not create the spreadsheet:', err.message);

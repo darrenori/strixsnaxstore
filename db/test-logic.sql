@@ -1,5 +1,5 @@
 -- ============================================================================
--- STRIX Snax Store — business-logic assertions
+-- STRIX Snax Store - business-logic assertions
 --
 -- Run against a scratch database that already has schema.sql + seed.sql:
 --
@@ -7,7 +7,7 @@
 --
 -- Everything happens inside a transaction that is rolled back at the end, so
 -- it is safe to point at a copy of production data. It is NOT safe to run on
--- production itself — it creates orders and moves stock before rolling back.
+-- production itself - it creates orders and moves stock before rolling back.
 -- ============================================================================
 
 \set ON_ERROR_STOP on
@@ -42,7 +42,7 @@ begin
   select id into v_coke from items where sku = 'DR-COKE';
 
   if v_milk is null then
-    raise exception 'seed.sql has not been applied — HP-MILK is missing';
+    raise exception 'seed.sql has not been applied - HP-MILK is missing';
   end if;
 
   update items set stock = 24, reserved = 0 where id in (v_milk, v_fish, v_coke);

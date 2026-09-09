@@ -1,5 +1,5 @@
 /**
- * Adversarial flow tests — the paths a shopper or an admin can actually reach
+ * Adversarial flow tests - the paths a shopper or an admin can actually reach
  * that the happy-path e2e never exercises.
  *
  * Everything here is about state transitions and money: stock that must come
@@ -79,7 +79,7 @@ let pass = 0;
 let fail = 0;
 const check = (name, cond, extra = '') => {
   if (cond) { pass += 1; console.log(`  OK   ${name}`); }
-  else { fail += 1; console.log(`  FAIL ${name}${extra ? `  — ${extra}` : ''}`); }
+  else { fail += 1; console.log(`  FAIL ${name}${extra ? `  - ${extra}` : ''}`); }
 };
 
 /** Read stock/reserved straight from the table; the API rounds them away. */
@@ -93,15 +93,15 @@ const catalog = await call('/api/catalog', { as: ADMIN });
 const items = catalog.body.categories.flatMap((c) => c.items);
 const bySku = (sku) => {
   const found = items.find((i) => i.sku === sku);
-  if (!found) throw new Error(`No seeded item with SKU ${sku} — db/seed.sql has moved`);
+  if (!found) throw new Error(`No seeded item with SKU ${sku} - db/seed.sql has moved`);
   return found;
 };
 
 // ---------------------------------------------------------------------------
-console.log('\n— the shelf is debited once, when the buyer collects —');
+console.log('\n- the shelf is debited once, when the buyer collects -');
 // The buyer takes their snacks the moment the screenshot is up, so the shelf
-// is debited there and nowhere else. Rejection cannot credit it back — the
-// packets are in someone's bag — and neither a re-submission nor a later
+// is debited there and nowhere else. Rejection cannot credit it back - the
+// packets are in someone's bag - and neither a re-submission nor a later
 // approval may debit it a second time.
 {
   const B = buyer(910101, 'Rejected');
@@ -142,7 +142,7 @@ console.log('\n— the shelf is debited once, when the buyer collects —');
 }
 
 // ---------------------------------------------------------------------------
-console.log('\n— nobody can collect and then cancel —');
+console.log('\n- nobody can collect and then cancel -');
 // Cancelling used to be allowed right up until an admin reviewed the order.
 // Now that collecting happens first, that same window would let someone walk
 // off with the snacks and then erase what they owe.
@@ -183,7 +183,7 @@ console.log('\n— nobody can collect and then cancel —');
 
 
 // ---------------------------------------------------------------------------
-console.log('\n— approving twice must not deduct twice —');
+console.log('\n- approving twice must not deduct twice -');
 {
   const B = buyer(910102, 'Doubler');
   const item = bySku('HP-MILK');
@@ -209,7 +209,7 @@ console.log('\n— approving twice must not deduct twice —');
 }
 
 // ---------------------------------------------------------------------------
-console.log('\n— a cancelled order puts its stock back —');
+console.log('\n- a cancelled order puts its stock back -');
 {
   const B = buyer(910103, 'Canceller');
   const item = bySku('RC-BBQ');
@@ -236,7 +236,7 @@ console.log('\n— a cancelled order puts its stock back —');
 }
 
 // ---------------------------------------------------------------------------
-console.log('\n— an abandoned checkout releases its hold —');
+console.log('\n- an abandoned checkout releases its hold -');
 {
   const B = buyer(910104, 'Ghost');
   const item = bySku('ND-NISSIN-TOMYAM');
@@ -265,7 +265,7 @@ console.log('\n— an abandoned checkout releases its hold —');
 }
 
 // ---------------------------------------------------------------------------
-console.log('\n— nobody can pin the shelf with unpaid orders —');
+console.log('\n- nobody can pin the shelf with unpaid orders -');
 {
   const B = buyer(910105, 'Hoarder');
   const item = bySku('LP-ALMOND');
@@ -287,7 +287,7 @@ console.log('\n— nobody can pin the shelf with unpaid orders —');
 }
 
 // ---------------------------------------------------------------------------
-console.log('\n— the last packet cannot be sold to two people —');
+console.log('\n- the last packet cannot be sold to two people -');
 {
   const A = buyer(910106, 'RaceA');
   const C = buyer(910107, 'RaceC');
@@ -312,7 +312,7 @@ console.log('\n— the last packet cannot be sold to two people —');
 }
 
 // ---------------------------------------------------------------------------
-console.log('\n— a closed store takes no orders —');
+console.log('\n- a closed store takes no orders -');
 {
   const B = buyer(910108, 'Latecomer');
   const item = bySku('DR-100PLUS');
@@ -337,7 +337,7 @@ console.log('\n— a closed store takes no orders —');
 }
 
 // ---------------------------------------------------------------------------
-console.log('\n— one shopper cannot touch another shopper’s order —');
+console.log('\n- one shopper cannot touch another shopper’s order -');
 {
   const OWNER = buyer(910109, 'Owner');
   const OTHER = buyer(910110, 'Other');
@@ -361,7 +361,7 @@ console.log('\n— one shopper cannot touch another shopper’s order —');
 }
 
 // ---------------------------------------------------------------------------
-console.log('\n— a blocked shopper is shut out —');
+console.log('\n- a blocked shopper is shut out -');
 {
   const B = buyer(910111, 'Blocked');
   await call('/api/me', { as: B });                       // exist first
@@ -373,7 +373,7 @@ console.log('\n— a blocked shopper is shut out —');
 }
 
 // ---------------------------------------------------------------------------
-console.log('\n— the public URLs that do real work are all guarded —');
+console.log('\n- the public URLs that do real work are all guarded -');
 {
   const noKey = await fetch(`${base}/api/cron/janitor`);
   check('the janitor refuses an unsigned call', noKey.status === 401, `got ${noKey.status}`);
@@ -398,7 +398,7 @@ console.log('\n— the public URLs that do real work are all guarded —');
 }
 
 // ---------------------------------------------------------------------------
-console.log('\n— a shopper cannot act as an admin —');
+console.log('\n- a shopper cannot act as an admin -');
 {
   const B = buyer(910113, 'Wannabe');
   const coke = bySku('DR-COKE');
@@ -411,7 +411,7 @@ console.log('\n— a shopper cannot act as an admin —');
 }
 
 // ---------------------------------------------------------------------------
-console.log('\n— an admin cannot lock everyone out —');
+console.log('\n- an admin cannot lock everyone out -');
 {
   const self = await call('/api/admin/users/role', { method: 'POST', body: { telegramId: 910777, isAdmin: false } });
   check('an admin cannot demote themselves', self.status === 400, `got ${self.status}`);
@@ -419,7 +419,7 @@ console.log('\n— an admin cannot lock everyone out —');
 }
 
 // ---------------------------------------------------------------------------
-console.log('\n— malformed carts are refused before they reach the database —');
+console.log('\n- malformed carts are refused before they reach the database -');
 {
   const B = buyer(910114, 'Fuzzer');
   const item = bySku('DR-COKE');

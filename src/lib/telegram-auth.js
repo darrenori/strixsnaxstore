@@ -4,7 +4,7 @@ import config from '../config.js';
 /**
  * Telegram Mini App authentication.
  *
- * The Mini App hands us `window.Telegram.WebApp.initData` — a urlencoded query
+ * The Mini App hands us `window.Telegram.WebApp.initData` - a urlencoded query
  * string that Telegram itself signed with our bot token. Because only Telegram
  * and we know that token, a valid signature proves the caller really is the
  * Telegram user named inside it. That is the whole basis of trust here: the
@@ -17,7 +17,7 @@ import config from '../config.js';
  * joined as "k=v" with newlines.
  */
 
-// Derived once — it is a pure function of the bot token.
+// Derived once - it is a pure function of the bot token.
 const SECRET_KEY = crypto
   .createHmac('sha256', 'WebAppData')
   .update(config.telegram.botToken)
@@ -70,7 +70,7 @@ export function verifyInitData(initData, { maxAgeSeconds = config.telegram.initD
 
   // Newer clients also send `signature`, an Ed25519 signature meant for
   // validating without the bot token. The spec excludes only `hash` from the
-  // data-check-string, so that is tried first — but clients have shipped both
+  // data-check-string, so that is tried first - but clients have shipped both
   // readings, and being wrong here locks every shopper out of the store.
   // Accepting either is safe: whichever fields went into the digest, forging it
   // still needs the bot token, and `signature` carries its own proof anyway.
@@ -87,7 +87,7 @@ export function verifyInitData(initData, { maxAgeSeconds = config.telegram.initD
     }
   }
 
-  // A correct signature is forever valid, so freshness has to be checked too —
+  // A correct signature is forever valid, so freshness has to be checked too -
   // otherwise a header lifted from a proxy log would work months later.
   const authDate = Number.parseInt(params.get('auth_date') ?? '', 10);
   if (!Number.isFinite(authDate)) {
@@ -95,7 +95,7 @@ export function verifyInitData(initData, { maxAgeSeconds = config.telegram.initD
   }
   const ageSeconds = Math.floor(Date.now() / 1000) - authDate;
   if (ageSeconds > maxAgeSeconds) {
-    throw new InitDataError('Telegram session expired — reopen the store', 'INIT_DATA_EXPIRED');
+    throw new InitDataError('Telegram session expired - reopen the store', 'INIT_DATA_EXPIRED');
   }
   // Small clock skew is normal; a wildly future date is not.
   if (ageSeconds < -300) {

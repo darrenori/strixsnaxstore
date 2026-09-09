@@ -14,7 +14,7 @@ export async function upsertUser(tgUser) {
 
   // One statement, so two devices opening the app at once cannot race to
   // insert the same telegram_id. `is_admin` is only ever raised here, never
-  // lowered — an admin granted in-app survives an env change.
+  // lowered - an admin granted in-app survives an env change.
   return one(
     `insert into app_users(telegram_id, username, first_name, last_name, photo_url,
                            display_name, is_admin)
@@ -36,7 +36,7 @@ export async function upsertUser(tgUser) {
 
 /**
  * Express middleware: every /api request must carry a live Telegram signature.
- * There is no cookie, no bearer token and no session store — the proof travels
+ * There is no cookie, no bearer token and no session store - the proof travels
  * with each call, so there is nothing for an attacker to steal and reuse.
  */
 export async function requireTelegramUser(req, res, next) {

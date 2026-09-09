@@ -3,14 +3,15 @@ import { Readable } from 'node:stream';
 import multer from 'multer';
 import { z } from 'zod';
 import * as orders from '../services/order.service.js';
-import { notifyAdminsOfOrder } from '../bot/notify.js';
+import { notifyAdminsOfOrder, askBuyerForProof } from '../bot/notify.js';
+import { sniffImage } from '../lib/image.js';
 import config from '../config.js';
 import log from '../lib/logger.js';
 
 const router = Router();
 
 // ---------------------------------------------------------------------------
-// Validation. The client is never trusted with prices — only ids and counts.
+// Validation. The client is never trusted with prices - only ids and counts.
 // ---------------------------------------------------------------------------
 const cartSchema = z.object({
   buyerName: z.string().trim().min(1, 'Tell us your name').max(80),
@@ -25,7 +26,7 @@ const proofSchema = z.object({
   paymentRef: z.string().trim().max(64).optional().or(z.literal('')),
 });
 
-/** Images only, held in memory — nothing ever touches the app's disk. */
+/** Images only, held in memory - nothing ever touches the app's disk. */
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: config.store.maxUploadBytes, files: 1 },
@@ -44,7 +45,7 @@ const upload = multer({
  * Replay a request body a serverless runtime already read.
  *
  * Vercel and friends buffer the whole body before the handler runs. For JSON
- * that is a convenience; for a file upload it is fatal — multer waits on a
+ * that is a convenience; for a file upload it is fatal - multer waits on a
  * stream that has already ended and the request hangs until the function
  * times out. The bytes are still there in req.body, so hand multer a stream
  * that replays them. On an ordinary server nothing parses multipart bodies,
@@ -59,27 +60,6 @@ function replayBufferedUpload(req, _res, next) {
   delete req.body;
   req._body = false;
   return next();
-}
-
-/**
- * A declared mime type is just a string the client chose. Check the magic
- * bytes too, so "screenshot.jpg" cannot smuggle in something else entirely.
- */
-function sniffImage(buffer) {
-  if (buffer.length < 12) return null;
-  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return { ext: 'jpg', mime: 'image/jpeg' };
-  if (buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
-    return { ext: 'png', mime: 'image/png' };
-  }
-  if (buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP') {
-    return { ext: 'webp', mime: 'image/webp' };
-  }
-  const brand = buffer.subarray(4, 8).toString('ascii');
-  if (brand === 'ftyp') {
-    const sub = buffer.subarray(8, 12).toString('ascii');
-    if (['heic', 'heix', 'hevc', 'mif1', 'heim'].includes(sub)) return { ext: 'heic', mime: 'image/heic' };
-  }
-  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -121,7 +101,47 @@ router.post('/orders/:id/cancel', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-/** Upload the PayNow screenshot and join the review queue. */
+/**
+ * Ask the bot to collect the payment screenshot in the chat.
+ *
+ * This is what the Mini App's pay screen presses instead of opening a file
+ * picker. A Telegram webview picking an image is the least reliable step in
+ * the whole shop, and sending a photo to a chat is the one thing every
+ * Telegram user has already done a hundred times.
+ */
+router.post('/orders/:id/request-proof', async (req, res, next) => {
+  try {
+    const order = await orders.getOrder(req.params.id, { userId: req.user.id });
+    if (!['awaiting_payment', 'rejected'].includes(order.status)) {
+      return res.status(409).json({
+        error: order.status === 'pending_review'
+          ? 'We already have a screenshot for that order.'
+          : 'That order is not waiting for a payment screenshot.',
+        code: 'ORDER_NOT_PAYABLE',
+      });
+    }
+
+    const sent = await askBuyerForProof(order);
+    if (!sent) {
+      return res.status(502).json({
+        error: 'We could not message you on Telegram. Open a chat with the bot and press Start, then try again.',
+        code: 'NOTIFY_FAILED',
+      });
+    }
+
+    await orders.markProofRequested(order.id);
+    return res.json({ ok: true, order: await orders.getOrder(order.id, { userId: req.user.id }) });
+  } catch (err) { return next(err); }
+});
+
+/**
+ * Upload the PayNow screenshot over HTTP.
+ *
+ * The Mini App no longer uses this; it asks the bot to collect the screenshot
+ * in the chat instead. The route stays as the way in for anyone who cannot,
+ * and it is the same service call the bot makes, so both paths reserve,
+ * settle and notify identically.
+ */
 router.post('/orders/:id/proof', replayBufferedUpload, upload.single('proof'), async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Attach your payment screenshot.' });

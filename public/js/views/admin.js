@@ -1,14 +1,15 @@
 import {
   el, empty, skeletons, statusPill, relTime, itemLabel, toast, withBusy, askText,
+  setAdminBadge,
 } from '../ui.js';
-import { state, emit } from '../store.js';
+import { state, emit, invalidateAdminSummary, refreshCatalog } from '../store.js';
 import { haptic, confirm, alert } from '../tg.js';
 import api from '../api.js';
 
 /**
- * The admin surface. Everything the committee used to do by hand — reading
+ * The admin surface. Everything the committee used to do by hand - reading
  * form responses, eyeballing screenshots, counting boxes on a shelf and
- * retyping it all into a spreadsheet — lives here, and every action writes
+ * retyping it all into a spreadsheet - lives here, and every action writes
  * through to both Supabase and the Google Sheet.
  */
 
@@ -49,7 +50,7 @@ function orderReviewCard(order, refresh) {
       statusPill(order.status)
     ),
     el('div', { class: 'order__items' },
-      ...order.items.map((i) => el('div', {}, `${i.quantity} × ${itemLabel(i)} — $${i.lineTotal}`))
+      ...order.items.map((i) => el('div', {}, `${i.quantity} × ${itemLabel(i)} - $${i.lineTotal}`))
     ),
     el('div', { class: 'order__foot' },
       el('span', { class: 'order__total' }, `$${order.total}`),
@@ -91,13 +92,15 @@ function orderReviewCard(order, refresh) {
   if (order.status === 'pending_review' || order.status === 'awaiting_payment') {
     const approve = el('button', { class: 'btn btn--sm btn--ok', type: 'button' }, '✅ APPROVE');
     approve.addEventListener('click', async () => {
-      const label = `${order.code} — $${order.total}`;
+      const label = `${order.code} - $${order.total}`;
       if (!(await confirm(`Confirm payment received for ${label}?`))) return;
       await withBusy(approve, '', async () => {
         try {
           await api.approve(order.id);
           haptic('success');
           toast(`${order.code} approved`, 'ok');
+          // The queue depth and the revenue tile have both just moved.
+          invalidateAdminSummary();
           refresh();
         } catch (err) { haptic('error'); toast(err.message, 'error'); }
       });
@@ -118,6 +121,7 @@ function orderReviewCard(order, refresh) {
           await api.reject(order.id, reason.trim() || 'Payment could not be verified');
           haptic('warning');
           toast(`${order.code} rejected`);
+          invalidateAdminSummary();
           refresh();
         } catch (err) { haptic('error'); toast(err.message, 'error'); }
       });
@@ -199,8 +203,12 @@ function renderStock(root) {
       try {
         const res = await api.stockTake(entries, 'Stock take from Mini App');
         haptic('success');
-        toast(`${res.updated} item(s) updated · sheet synced`, 'ok');
+        toast(`${res.updated} item(s) updated · sheet syncing`, 'ok');
         dirty.clear();
+        // The low-stock panel on the Verify tab is now wrong, and so is the
+        // shopper's copy of the menu.
+        invalidateAdminSummary();
+        refreshCatalog();
         load();
       } catch (err) { haptic('error'); toast(err.message, 'error'); }
     });
@@ -237,8 +245,10 @@ function renderStock(root) {
     return el('div', { class: `stock-row ${item.isLow ? 'is-low' : ''}`.trim() },
       el('div', {},
         el('div', { class: 'stock-row__name' }, itemLabel(item)),
+        // The card heading already says the category. The SKU is the column
+        // an admin is matching against in the spreadsheet, so show that.
         el('div', { class: 'stock-row__sub' },
-          `${item.categoryName} · $${item.price}` +
+          `${item.sku} · ${item.price}` +
           (item.reserved > 0 ? ` · ${item.reserved} reserved` : '') +
           (item.isActive ? '' : ' · HIDDEN'))
       ),
@@ -284,7 +294,7 @@ function renderStock(root) {
 }
 
 // ===========================================================================
-// Items — create and edit the menu
+// Items - create and edit the menu
 // ===========================================================================
 
 function itemForm(categories, onCreated) {
@@ -363,8 +373,8 @@ function itemForm(categories, onCreated) {
 function categoryForm(onCreated) {
   const name = el('input', { class: 'input', maxlength: '60', placeholder: 'e.g. Ice Cream' });
   const kind = el('select', { class: 'select' },
-    el('option', { value: 'snack' }, '🐼 Snax — Blk B Lounge'),
-    el('option', { value: 'drink' }, '🥤 Drinks — Blk B Pantry')
+    el('option', { value: 'snack' }, '🐼 Snax - Blk B Lounge'),
+    el('option', { value: 'drink' }, '🥤 Drinks - Blk B Pantry')
   );
   const accent = el('select', { class: 'select' },
     ...['blue', 'red', 'navy', 'gold', 'sky'].map((a) => el('option', { value: a }, a))
@@ -444,10 +454,24 @@ function renderItems(root) {
   const formSlot = el('div', {});
   const list = el('div', {}, skeletons(4));
 
+  /**
+   * After an edit, not merely after a render.
+   *
+   * A price change or a hidden line has just made three other things wrong:
+   * the shopper's copy of the menu, the low-stock panel on the Verify tab,
+   * and this list. Refreshing only the list is how an admin ends up believing
+   * a change did not take, because the Shop tab still shows the old price.
+   */
+  const afterChange = () => {
+    invalidateAdminSummary();
+    refreshCatalog();
+    load();
+  };
+
   const load = async () => {
     try {
       const { items, categories } = await api.adminCatalog();
-      formSlot.replaceChildren(categoryForm(load), itemForm(categories, load));
+      formSlot.replaceChildren(categoryForm(afterChange), itemForm(categories, afterChange));
 
       list.replaceChildren(el('h2', { class: 'card__title mt' }, 'Current menu'));
       const groups = new Map();
@@ -458,7 +482,7 @@ function renderItems(root) {
       for (const [name, group] of groups) {
         const card = el('section', { class: 'card card--flat' },
           el('h3', { class: 'card__title' }, name));
-        for (const item of group) card.append(existingItemRow(item, load));
+        for (const item of group) card.append(existingItemRow(item, afterChange));
         list.append(card);
       }
     } catch (err) {
@@ -571,10 +595,13 @@ function renderSettings(root, summary) {
       await api.settings({ storeOpen: openToggle.checked, announcement: announcement.value.trim() });
       haptic('success');
       toast('Settings saved', 'ok');
+      // Both of these show on the shop header, so pull it through.
+      invalidateAdminSummary();
+      await refreshCatalog();
     } catch (err) { haptic('error'); toast(err.message, 'error'); }
   }));
 
-  // Two directions, named so it is obvious which way the data moves — a push
+  // Two directions, named so it is obvious which way the data moves - a push
   // overwrites whatever was typed in the sheet, so mixing them up loses work.
   const syncBtn = el('button', { class: 'btn btn--navy', type: 'button' }, '↑ PUSH MENU TO SHEET');
   syncBtn.addEventListener('click', () => withBusy(syncBtn, 'PUSHING', async () => {
@@ -597,7 +624,7 @@ function renderSettings(root, summary) {
       if (!parts.length) parts.push('nothing to change');
       toast(parts.join(' · '), r.skipped.length ? 'warn' : 'ok');
 
-      // A skipped row is the interesting case — say which and why, because
+      // A skipped row is the interesting case - say which and why, because
       // the sheet will look untouched and that is easy to misread as a bug.
       if (r.skipped.length) {
         await alert(
@@ -607,11 +634,8 @@ function renderSettings(root, summary) {
       }
       // The shop is rendering from a catalogue these edits have just made
       // stale, so pull it again before letting the view redraw.
-      try {
-        const fresh = await api.catalog();
-        state.catalog = fresh;
-        state.store = fresh.store;
-      } catch { /* the next navigation will pick it up */ }
+      await refreshCatalog();
+      invalidateAdminSummary();
       emit();
     } catch (err) { haptic('error'); toast(err.message, 'error'); }
   }));
@@ -637,7 +661,7 @@ function renderSettings(root, summary) {
           ? 'Connected. Approved orders are appended automatically. Edit prices, '
             + 'names or stock in Items & Stock, then press SYNC FROM SHEET to apply '
             + 'them here. Pushing overwrites the sheet, so sync first.'
-          : 'Not configured — set the Google service-account variables on the server.'),
+          : 'Not configured - set the Google service-account variables on the server.'),
       summary.integrations.sheetUrl
         ? el('p', {}, el('a', { href: summary.integrations.sheetUrl, target: '_blank', rel: 'noopener' },
             'Open the spreadsheet ↗'))
@@ -650,7 +674,7 @@ function renderSettings(root, summary) {
       el('h2', { class: 'card__title' }, '💳 PayNow'),
       el('p', { class: 'muted mb0' },
         summary.integrations.paynowDynamic
-          ? 'Dynamic QR is on — each order gets its own amount-locked code.'
+          ? 'Dynamic QR is on - each order gets its own amount-locked code.'
           : 'Using the static poster QR. Set PAYNOW_PROXY_VALUE on the server to lock amounts per order.')
     )
   );
@@ -660,13 +684,35 @@ function renderSettings(root, summary) {
 // Shell
 // ===========================================================================
 
+/**
+ * The dashboard numbers, from cache when they are fresh enough.
+ *
+ * Every screen in this app is rebuilt when anything changes, and the admin
+ * screen used to answer that by fetching the summary again each time. Moving
+ * between the five tabs was five round trips for numbers that had not moved,
+ * and on a phone that is exactly the pause that reads as the app hanging.
+ * Anything that actually changes the numbers clears the cache itself.
+ */
+const SUMMARY_TTL_MS = 20_000;
+
+function loadSummary() {
+  const fresh = state.adminSummary && Date.now() - state.adminSummaryAt < SUMMARY_TTL_MS;
+  if (fresh) return Promise.resolve(state.adminSummary);
+
+  return api.adminSummary().then((summary) => {
+    state.adminSummary = summary;
+    state.adminSummaryAt = Date.now();
+    return summary;
+  });
+}
+
 export function renderAdmin() {
   const root = el('div', {});
   const body = el('div', {}, skeletons(3));
 
   root.append(tabBar((tab) => { state.adminTab = tab; emit(); }), body);
 
-  api.adminSummary()
+  loadSummary()
     .then((summary) => {
       state.pendingCount = summary.stats.pendingReview;
       body.replaceChildren();
@@ -707,20 +753,13 @@ export function renderAdmin() {
       }
 
       // Refresh the tab-bar badge now that we know the queue depth.
-      emitBadge(summary.stats.pendingReview);
+      setAdminBadge(summary.stats.pendingReview);
     })
     .catch((err) => {
       body.replaceChildren(empty({ icon: '⚠️', title: 'Admin unavailable', text: err.message }));
     });
 
   return root;
-}
-
-function emitBadge(count) {
-  const badge = document.getElementById('adminBadge');
-  if (!badge) return;
-  badge.textContent = String(count);
-  badge.hidden = count === 0;
 }
 
 export default renderAdmin;

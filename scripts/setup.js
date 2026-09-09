@@ -24,7 +24,7 @@ const envPath = path.join(root, '.env');
  * Prompting that works whether a human is typing or answers are piped in.
  *
  * readline emits every buffered line the moment piped input arrives, but
- * question() only captures the line that comes after it is called — so with a
+ * question() only captures the line that comes after it is called - so with a
  * pipe, everything past the first answer is dropped on the floor. When stdin
  * is not a TTY we therefore read it all up front and serve answers from a
  * queue, which also makes a scripted, non-interactive setup possible.
@@ -87,12 +87,12 @@ function inspectDbUrl(raw) {
     return { valid: false, reason: 'It should start with postgresql://' };
   }
   if (!url.password || url.password.includes('YOUR-PASSWORD') || url.password.startsWith('[')) {
-    return { valid: false, reason: 'The password is still a placeholder — paste the real one.' };
+    return { valid: false, reason: 'The password is still a placeholder - paste the real one.' };
   }
   return { valid: true, port: url.port || '5432', host: url.hostname };
 }
 
-console.log(`\n${b('STRIX Snax Store — setup')}\n`);
+console.log(`\n${b('STRIX Snax Store - setup')}\n`);
 
 if (fs.existsSync(envPath)) {
   const answer = await ask(`${warn('.env already exists.')} Overwrite it? ${dim('(y/N)')} `, {
@@ -150,7 +150,7 @@ const paynow = await ask('   PayNow number or UEN (blank to skip): ', { required
 const paynowType = paynow && /^[a-z]/i.test(paynow.replace(/^\+?\d+/, '')) && !paynow.startsWith('+')
   ? 'uen' : 'mobile';
 if (paynow) console.log(ok(`   ✓ ${paynowType}\n`));
-else console.log(warn('   ○ skipped — using the static QR\n'));
+else console.log(warn('   ○ skipped - using the static QR\n'));
 
 // --- 4. admin --------------------------------------------------------------
 console.log(b('4. Admin'));
