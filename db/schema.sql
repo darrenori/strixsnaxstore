@@ -79,7 +79,15 @@ create index if not exists items_active_idx   on items(is_active) where is_activ
 alter table items add column if not exists low_stock_alerted_at timestamptz;
 
 -- Anything not held by a live order is buyable.
-create or replace view items_public as
+--
+-- Dropped first rather than replaced. The view selects `i.*`, so every column
+-- added to `items` lands in the middle of its column list, ahead of the
+-- computed `available`. Postgres reads that as renaming a column and refuses
+-- the whole `create or replace` with "cannot change name of view column",
+-- which fails the migration on an existing database while passing cleanly on
+-- a fresh one. Nothing selects from this view, so dropping it costs nothing.
+drop view if exists items_public;
+create view items_public as
   select i.*, greatest(i.stock - i.reserved, 0) as available
   from items i;
 
