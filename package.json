@@ -24,7 +24,8 @@
     "test:vercel": "node tests/vercel.integration.mjs",
     "test:local": "node scripts/test-local.js",
     "test:flows": "node tests/flows.integration.mjs",
-    "test:bot": "node tests/bot.integration.mjs"
+    "test:bot": "node tests/bot.integration.mjs",
+    "vercel:env": "node scripts/vercel-env.js"
   },
   "dependencies": {
     "@googleapis/drive": "^22.0.0",
