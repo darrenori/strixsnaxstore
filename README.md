@@ -45,6 +45,9 @@ screenshot, and every confirmed sale written into Google Sheets.
 - Every movement of stock lands in `Stock Movements`, sales included. The
   ledger tab used to show only what admins typed, which described a shop where
   nothing was ever sold.
+- Routine stock changes update only the affected SKU rows instead of clearing
+  and rewriting the whole catalogue tab. Sheet work is recorded in Postgres
+  first, so a failed or interrupted attempt is retried by the next worker run.
 - When a line falls to its last couple of units, every admin gets a Telegram
   message. Once per crossing, not once per sale: restocking re-arms it.
 - The sheet edits back. Change a price, name, stock count or the Active flag
@@ -91,6 +94,9 @@ Express API  ──────────────►  Postgres
 - **Screenshots** live in the database and have no URL of their own. An admin
   fetches one through a route behind both the signature check and the admin
   gate, so there is nothing guessable to share or leak.
+- **Retention.** Screenshot storage is reported in the admin settings screen
+  and settled images are removed after `PROOF_RETENTION_DAYS` (60 by default).
+  The order, receipt and review record remain.
 - **Uploads** are checked by magic bytes, not by the filename or the
   client-declared MIME type.
 
@@ -303,7 +309,7 @@ src/
   lib/
     telegram-auth.js     initData HMAC verification
     auth.js              middleware: identity + admin gate
-    supabase.js          service-role client, error translation
+    db.js                Postgres pool, query helpers, error translation
     paynow.js            EMVCo/SGQR payload + QR rendering
     sheets.js            Google Sheets collation
   services/              catalog, orders, admin - the business logic
@@ -328,8 +334,8 @@ the umbrella `googleapis` package, which bundles every Google API and costs
 ## Tests
 
 ```bash
-npm test          # 28 unit tests: signature forgery, PayNow payloads, HTTP auth
-npm run test:local  # 148 integration checks against a throwaway Postgres
+npm test           # 32 unit tests: signature forgery, PayNow payloads, HTTP auth
+npm run test:local # 259 integration checks against a throwaway Postgres
 npm run check     # parse every file, then run all of the above
 ```
 
@@ -339,19 +345,17 @@ Postgres compiled to WASM, so the same plpgsql and the same row locks - applies
 
 | Suite | Checks | Covers |
 |-------|--------|--------|
-| `sql` | 23 | the money and stock rules asserted directly against the plpgsql functions |
-| `e2e` | 28 | the happy path: catalogue, pricing, proof upload, approval, stock |
-| `flows` | 57 | what happens when it goes wrong: rejection, cancellation, expiry, races, every guard |
+| `sql` | 15 | the money and stock rules asserted directly against the plpgsql functions |
+| `e2e` | 30 | the happy path: catalogue, pricing, proof upload, approval, stock |
+| `flows` | 65 | what happens when it goes wrong: rejection, cancellation, expiry, races, every guard |
 | `bot` | 74 | the real Telegram handlers driven through the webhook, against a stub Bot API, including the whole screenshot-in-the-chat flow and the low-stock alert |
-| `sheets` | 62 | the collation, against a stub that refuses the A1 ranges Google refuses |
+| `sheets` | 65 | the collation, against a stub that refuses the A1 ranges Google refuses |
 | `vercel` | 10 | the serverless request shape, including a screenshot upload on a pre-read body |
 
-The `sheets` suite exists because the collation is best-effort by design:
-every failure there is logged and swallowed so a Google outage cannot stop
-somebody buying a packet of noodles. That is the right trade, and it is also
-how a malformed range string goes unnoticed for weeks while orders quietly
-fail to appear. The stub enforces Google's own rules, so a range that would
-be rejected in production is rejected in the test.
+The `sheets` suite exists because a Google outage must not stop somebody buying
+a packet of noodles. Follow-up work is persisted in `background_jobs` and
+retried, while the Google stub enforces the real API's range rules so a range
+that would be rejected in production is rejected in the test.
 
 Run one at a time with `npm run test:local -- flows`. To run against a real
 database instead, set `DATABASE_URL` and use `npm run test:e2e`.

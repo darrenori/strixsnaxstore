@@ -14,6 +14,7 @@ import migrateRoutes from './routes/migrate.js';
 import telegramSetupRoutes from './routes/telegram-setup.js';
 import { launchBot, getBot } from './bot/index.js';
 import { expireStaleOrders, pruneOldProofs } from './services/order.service.js';
+import { drainBackgroundJobs, kickJobRunner } from './services/collation.service.js';
 import { ensureTabs, sheetsEnabled } from './lib/sheets.js';
 import { ping as pingDb, close as closeDb } from './lib/db.js';
 
@@ -133,7 +134,8 @@ app.all('/api/cron/janitor', async (req, res) => {
   try {
     const expired = await expireStaleOrders();
     const pruned = req.query.prune === '1' ? await pruneOldProofs() : 0;
-    return res.json({ ok: true, expired, pruned });
+    const jobs = await drainBackgroundJobs({ limit: 200 });
+    return res.json({ ok: true, expired, pruned, jobs });
   } catch (err) {
     log.error('Cron janitor failed', { error: err.message });
     return res.status(500).json({ ok: false });
@@ -226,6 +228,7 @@ app.use((err, req, res, _next) => {
 async function main() {
   // Fail loudly here rather than on a shopper's first order.
   await pingDb();
+  kickJobRunner();
 
   const server = app.listen(config.port, () => {
     log.info('HTTP server listening', { port: config.port, publicUrl: config.publicUrl || '(unset)' });
@@ -248,6 +251,7 @@ async function main() {
   let sweeps = 0;
   const janitor = setInterval(() => {
     expireStaleOrders().catch((err) => log.error('Janitor failed', { error: err.message }));
+    kickJobRunner();
     // Roughly daily, given a 5-minute tick.
     if (sweeps++ % 288 === 0) {
       pruneOldProofs().catch((err) => log.error('Proof prune failed', { error: err.message }));

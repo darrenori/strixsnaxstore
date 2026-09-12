@@ -198,13 +198,12 @@ create table if not exists stock_movements (
 
 create index if not exists stock_movements_item_idx on stock_movements(item_id, created_at desc);
 
--- When this movement was copied into the spreadsheet's ledger tab.
---
--- The tab is append-only, so "write the rows for this order" run twice writes
--- them twice, and a shop that sold two packets appears to have sold four. The
--- stamp makes the copy a claim: a row is written exactly once, whichever of
--- the several things that move stock happens to trigger the sync.
+-- When this movement was copied into the spreadsheet's ledger tab, and the
+-- temporary claim held while a worker is copying it. The permanent stamp is
+-- written only after Google accepts the row; stale claims become eligible
+-- again, and Movement ID in the sheet makes that retry idempotent.
 alter table stock_movements add column if not exists sheeted_at timestamptz;
+alter table stock_movements add column if not exists sheet_claimed_at timestamptz;
 
 create index if not exists stock_movements_unsheeted_idx
   on stock_movements(created_at) where sheeted_at is null;
@@ -224,6 +223,34 @@ insert into settings(key, value) values
   -- How long an unpaid order holds its stock before the janitor releases it.
   ('order_expiry_minutes', '45'::jsonb)
 on conflict (key) do nothing;
+
+-- ---------------------------------------------------------------------------
+-- Durable background work
+-- ---------------------------------------------------------------------------
+-- Google Sheets and Telegram are slower and less reliable than the database.
+-- Record follow-up work here before replying so a serverless invocation ending
+-- early cannot silently lose it. Jobs with the same kind/key coalesce; revision
+-- prevents a worker from deleting a newer request that arrived while it ran.
+create table if not exists background_jobs (
+  id          bigserial primary key,
+  kind        text not null check (kind in (
+                'order_sheet_sync', 'catalog_sheet_sync',
+                'stock_ledger_sync', 'low_stock_check'
+              )),
+  entity_key  text not null,
+  payload     jsonb not null default '{}'::jsonb,
+  revision    int not null default 1,
+  attempts    int not null default 0,
+  run_after   timestamptz not null default now(),
+  claimed_at  timestamptz,
+  last_error  text,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+  unique (kind, entity_key)
+);
+
+create index if not exists background_jobs_due_idx
+  on background_jobs(run_after, id);
 
 -- ---------------------------------------------------------------------------
 -- updated_at triggers
@@ -668,6 +695,12 @@ create table if not exists payment_proofs (
 );
 
 create index if not exists payment_proofs_order_idx on payment_proofs(order_id, created_at desc);
+
+-- Screenshot pruning joins from settled orders by review time. This partial
+-- index keeps that daily cleanup proportional to the rows that can be pruned.
+create index if not exists orders_proof_prune_idx on orders(reviewed_at)
+  where payment_proof_id is not null
+    and status in ('paid','collected','rejected','cancelled');
 
 do $$ begin
   alter table orders

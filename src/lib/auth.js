@@ -13,20 +13,36 @@ export async function upsertUser(tgUser) {
   const shouldBeAdmin = config.store.bootstrapAdminIds.includes(tgUser.id);
 
   // One statement, so two devices opening the app at once cannot race to
-  // insert the same telegram_id. `is_admin` is only ever raised here, never
-  // lowered - an admin granted in-app survives an env change.
+  // insert the same telegram_id. Most authenticated requests only read this
+  // row: avoid producing a new Postgres row version each time unless profile
+  // data changed or the activity stamp is at least five minutes old.
+  // `is_admin` is only ever raised here, never lowered - an admin granted
+  // in-app survives an env change.
   return one(
-    `insert into app_users(telegram_id, username, first_name, last_name, photo_url,
-                           display_name, is_admin)
-     values ($1, $2, $3, $4, $5, $6, $7)
-     on conflict (telegram_id) do update set
-       username     = excluded.username,
-       first_name   = excluded.first_name,
-       last_name    = excluded.last_name,
-       photo_url    = excluded.photo_url,
-       is_admin     = app_users.is_admin or excluded.is_admin,
-       last_seen_at = now()
-     returning *`,
+    `with saved as (
+       insert into app_users(telegram_id, username, first_name, last_name, photo_url,
+                             display_name, is_admin)
+       values ($1, $2, $3, $4, $5, $6, $7)
+       on conflict (telegram_id) do update set
+         username     = excluded.username,
+         first_name   = excluded.first_name,
+         last_name    = excluded.last_name,
+         photo_url    = excluded.photo_url,
+         is_admin     = app_users.is_admin or excluded.is_admin,
+         last_seen_at = now()
+       where app_users.username   is distinct from excluded.username
+          or app_users.first_name is distinct from excluded.first_name
+          or app_users.last_name  is distinct from excluded.last_name
+          or app_users.photo_url  is distinct from excluded.photo_url
+          or (excluded.is_admin and not app_users.is_admin)
+          or app_users.last_seen_at < now() - interval '5 minutes'
+       returning *
+     )
+     select * from saved
+     union all
+     select * from app_users
+      where telegram_id = $1 and not exists (select 1 from saved)
+     limit 1`,
     [
       tgUser.id, tgUser.username, tgUser.firstName, tgUser.lastName,
       tgUser.photoUrl, displayNameOf(tgUser), shouldBeAdmin,

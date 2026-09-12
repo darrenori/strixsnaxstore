@@ -1,6 +1,7 @@
 import { query, one, rpc, transaction, parseDbError } from '../lib/db.js';
 import { createPaymentQr } from '../lib/paynow.js';
 import { queueOrderSync, queueStockFollowUp, syncOrderToSheets } from './collation.service.js';
+import config from '../config.js';
 import log from '../lib/logger.js';
 
 export class OrderError extends Error {
@@ -98,8 +99,10 @@ export async function placeOrder({ user, buyerName, note, cart }) {
   // The sheet gets the order now, not when somebody eventually verifies it.
   // Reserving stock has also just cut what everyone else can buy, so the
   // stock columns and the low-stock alert are re-derived from the same event.
-  queueOrderSync(order.id);
-  queueStockFollowUp();
+  await Promise.all([
+    queueOrderSync(order.id),
+    queueStockFollowUp(items.map((item) => item.sku)),
+  ]);
 
   return { order: toPublicOrder(order, items), payment: qr };
 }
@@ -204,10 +207,13 @@ export async function attachPaymentProof({
 
   // The packets have physically left the shelf, so this is the moment the
   // spreadsheet's stock column and the admins' low-stock alert both hang on.
-  queueOrderSync(updated.id);
-  queueStockFollowUp();
+  const items = await loadItems(updated.id);
+  await Promise.all([
+    queueOrderSync(updated.id),
+    queueStockFollowUp(items.map((item) => item.sku)),
+  ]);
 
-  return toPublicOrder(updated, await loadItems(updated.id));
+  return toPublicOrder(updated, items);
 }
 
 /**
@@ -293,10 +299,13 @@ export async function cancelOrder({ orderId, user }) {
   }
 
   // The hold is off, so the shelf has more on it than it did a second ago.
-  queueOrderSync(orderId);
-  queueStockFollowUp();
+  const updated = await getOrder(orderId, { userId: user.id });
+  await Promise.all([
+    queueOrderSync(orderId),
+    queueStockFollowUp(updated.items.map((item) => item.sku)),
+  ]);
 
-  return getOrder(orderId, { userId: user.id });
+  return updated;
 }
 
 // ---------------------------------------------------------------------------
@@ -348,13 +357,17 @@ export async function approveOrder({ orderId, admin, note }) {
   // Awaited, not queued: an admin who has just pressed Approve is entitled to
   // find that row in the spreadsheet a moment later, and this is the one place
   // where somebody is actually watching for it.
-  await syncOrderToSheets(orderId).catch((err) =>
-    log.error('Order sheet sync failed', { code: order.code, error: err.message }));
+  const synced = await syncOrderToSheets(orderId).catch((err) => {
+    log.error('Order sheet sync failed', { code: order.code, error: err.message });
+    return false;
+  });
+  if (!synced) await queueOrderSync(orderId);
 
   // Approving an order that never had a screenshot settles its stock here.
-  queueStockFollowUp();
+  const items = await loadItems(order.id);
+  await queueStockFollowUp(items.map((item) => item.sku));
 
-  return toPublicOrder(order, await loadItems(order.id));
+  return toPublicOrder(order, items);
 }
 
 export async function rejectOrder({ orderId, admin, note, status = 'rejected' }) {
@@ -370,11 +383,15 @@ export async function rejectOrder({ orderId, admin, note, status = 'rejected' })
   }
   log.info('Order rejected', { code: order.code, admin: admin.telegram_id, status });
 
-  await syncOrderToSheets(orderId).catch((err) =>
-    log.error('Order sheet sync failed', { code: order.code, error: err.message }));
-  queueStockFollowUp();
+  const synced = await syncOrderToSheets(orderId).catch((err) => {
+    log.error('Order sheet sync failed', { code: order.code, error: err.message });
+    return false;
+  });
+  if (!synced) await queueOrderSync(orderId);
+  const items = await loadItems(order.id);
+  await queueStockFollowUp(items.map((item) => item.sku));
 
-  return toPublicOrder(order, await loadItems(order.id));
+  return toPublicOrder(order, items);
 }
 
 /** Counts for the admin dashboard, in one round trip. */
@@ -394,6 +411,26 @@ export async function getStats() {
   };
 }
 
+/** Storage visibility for the screenshots kept in PostgreSQL. */
+export async function getProofStorageStats() {
+  const row = await one(`
+    select count(*)::int as count,
+           coalesce(sum(p.byte_size), 0)::bigint as bytes,
+           coalesce(avg(p.byte_size), 0)::bigint as average_bytes,
+           coalesce(max(p.byte_size), 0)::int as largest_bytes,
+           min(p.created_at) as oldest_at
+      from payment_proofs p
+  `);
+  return {
+    count: Number(row?.count ?? 0),
+    bytes: Number(row?.bytes ?? 0),
+    averageBytes: Number(row?.average_bytes ?? 0),
+    largestBytes: Number(row?.largest_bytes ?? 0),
+    oldestAt: row?.oldest_at ?? null,
+    retentionDays: Math.max(1, config.store.proofRetentionDays),
+  };
+}
+
 /**
  * Release stock held by orders nobody ever paid for.
  *
@@ -405,15 +442,20 @@ export async function getStats() {
 export async function expireStaleOrders() {
   try {
     const stale = await query(
-      `select id from orders
-        where status = 'awaiting_payment' and expires_at < now() limit 100`
+      `select o.id, coalesce(array_agg(oi.sku) filter (where oi.sku is not null), '{}') as skus
+         from orders o
+         left join order_items oi on oi.order_id = o.id
+        where o.status = 'awaiting_payment' and o.expires_at < now()
+        group by o.id, o.created_at
+        order by o.created_at
+        limit 100`
     );
     const row = await one('select expire_stale_orders() as n');
     const n = Number(row?.n ?? 0);
     if (n > 0) {
       log.info('Expired stale orders', { count: n });
-      for (const o of stale) queueOrderSync(o.id);
-      queueStockFollowUp();
+      await Promise.all(stale.map((o) => queueOrderSync(o.id)));
+      await queueStockFollowUp(stale.flatMap((o) => o.skus ?? []));
     }
     return n;
   } catch (err) {
@@ -423,9 +465,10 @@ export async function expireStaleOrders() {
 }
 
 /** Drop screenshots for long-settled orders so the disk does not fill. */
-export async function pruneOldProofs(days = 60) {
+export async function pruneOldProofs(days = config.store.proofRetentionDays) {
   try {
-    const row = await one('select prune_old_proofs($1) as n', [days]);
+    const keepDays = Math.max(1, Number(days) || 60);
+    const row = await one('select prune_old_proofs($1) as n', [keepDays]);
     const n = Number(row?.n ?? 0);
     if (n > 0) log.info('Pruned old payment proofs', { count: n });
     return n;
@@ -439,5 +482,5 @@ export default {
   placeOrder, getOrder, getOrderByCode, getOrderWithPayment, listUserOrders,
   attachPaymentProof, markProofRequested, listOrdersAwaitingProof,
   getProof, cancelOrder, listOrders, approveOrder, rejectOrder,
-  getStats, expireStaleOrders, pruneOldProofs, OrderError,
+  getStats, getProofStorageStats, expireStaleOrders, pruneOldProofs, OrderError,
 };

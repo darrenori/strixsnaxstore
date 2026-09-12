@@ -27,6 +27,7 @@ process.env.LOG_LEVEL = 'error';
 process.env.NODE_ENV = 'test';
 
 const { default: app } = await import('../src/index.js');
+const { one, close } = await import('../src/lib/db.js');
 
 const server = await new Promise((r) => { const s = app.listen(0, () => r(s)); });
 const base = `http://127.0.0.1:${server.address().port}`;
@@ -79,6 +80,11 @@ const me = await call('/api/me');
 check('buyer is not admin', me.body.isAdmin === false);
 const meAdmin = await call('/api/me', { as: ADMIN });
 check('bootstrap id is admin', meAdmin.body.isAdmin === true);
+const seenBefore = await one('select last_seen_at from app_users where telegram_id = $1', [900111]);
+await call('/api/catalog');
+const seenAfter = await one('select last_seen_at from app_users where telegram_id = $1', [900111]);
+check('repeat reads do not rewrite last_seen_at within five minutes',
+  new Date(seenBefore.last_seen_at).getTime() === new Date(seenAfter.last_seen_at).getTime());
 
 console.log('\n- admin gate -');
 check('buyer blocked from admin summary', (await call('/api/admin/summary')).status === 403);
@@ -121,6 +127,10 @@ const upBody = await up.json();
 check('proof accepted', up.status === 200, JSON.stringify(upBody).slice(0, 120));
 check('order moved to pending_review', upBody.order?.status === 'pending_review');
 check('order reports it has proof', upBody.order?.hasProof === true);
+const storage = await call('/api/admin/summary', { as: ADMIN });
+check('admin storage metrics include the uploaded screenshot',
+  storage.body?.proofStorage?.count === 1 && storage.body.proofStorage.bytes === png.length,
+  JSON.stringify(storage.body?.proofStorage));
 
 const notImage = new FormData();
 notImage.append('proof', new Blob([Buffer.from('this is not a png at all, just text')], { type: 'image/png' }), 'x.png');
@@ -166,6 +176,5 @@ check('revenue counts only verified money', sum.body.stats.revenue === '6.40', s
 
 console.log(`\n${fail ? '❌' : '✅'} ${pass} passed, ${fail} failed\n`);
 server.close();
-const { close } = await import('../src/lib/db.js');
 await close();
 process.exit(fail ? 1 : 0);

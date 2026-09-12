@@ -301,6 +301,7 @@ console.log('\n- the tabs are built on a spreadsheet nobody prepared -');
 }
 
 console.log('\n- the catalogue mirror -');
+let catalogClearsAfterFullSync = 0;
 {
   const { syncCatalogToSheets } = await import('../src/services/collation.service.js');
   check('a full sync succeeds', (await syncCatalogToSheets()) === true);
@@ -313,6 +314,7 @@ console.log('\n- the catalogue mirror -');
   check('the row carries the price as a number', milk?.[7] === '1.20', milk?.[7]);
   check('and the collection point', milk?.[3] === 'Blk B Lounge', milk?.[3]);
   check('and marks the row active', milk?.[13] === 'Yes', milk?.[13]);
+  catalogClearsAfterFullSync = calls.filter((c) => c.method === 'POST' && c.path.endsWith(':clear')).length;
 }
 
 console.log('\n- an order reaches the sheet when it is placed, not when it is verified -');
@@ -349,6 +351,12 @@ console.log('\n- reserving stock moves the Available column -');
   check('two units are shown as reserved', milk?.[9] === '2', milk?.[9]);
   check('and availability is stock minus reservation',
     Number(milk?.[10]) === Number(milk?.[8]) - 2, `${milk?.[10]} vs ${milk?.[8]}`);
+  check('routine stock changes do not clear and rewrite the catalogue',
+    calls.filter((c) => c.method === 'POST' && c.path.endsWith(':clear')).length
+      === catalogClearsAfterFullSync);
+  const { one } = await import('../src/lib/db.js');
+  check('completed background work leaves no queued jobs',
+    Number((await one('select count(*) as n from background_jobs')).n) === 0);
 }
 
 console.log('\n- the screenshot updates the row that is already there -');
@@ -382,6 +390,7 @@ console.log('\n- a sale is a stock movement, and shows up as one -');
   check('the sale is in the ledger tab', moves.length === 1, `got ${moves.length}`);
   check('as a debit of two', moves[0]?.[3] === '-2', moves[0]?.[3]);
   check('with the reason recorded', moves[0]?.[5] === 'order_paid', moves[0]?.[5]);
+  check('with a stable movement id for retry deduplication', Boolean(moves[0]?.[9]));
 
   const milk = rows('Items & Stock').find((r) => r?.[0] === 'HP-MILK');
   check('the stock column followed the sale down', milk?.[8] === '22', milk?.[8]);

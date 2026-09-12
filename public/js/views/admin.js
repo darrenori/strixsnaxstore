@@ -580,6 +580,12 @@ function renderPeople(root) {
 // Store settings
 // ===========================================================================
 
+function storageSize(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 MB';
+  if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function renderSettings(root, summary) {
   const openToggle = el('input', { type: 'checkbox' });
   openToggle.checked = summary.settings.storeOpen;
@@ -676,6 +682,12 @@ function renderSettings(root, summary) {
         summary.integrations.paynowDynamic
           ? 'Dynamic QR is on - each order gets its own amount-locked code.'
           : 'Using the static poster QR. Set PAYNOW_PROXY_VALUE on the server to lock amounts per order.')
+    ),
+    el('section', { class: 'card card--flat' },
+      el('h2', { class: 'card__title' }, '🗄️ Screenshot storage'),
+      el('p', { class: 'muted mb0' },
+        `${summary.proofStorage.count} image(s) · ${storageSize(summary.proofStorage.bytes)} total · `
+        + `deleted ${summary.proofStorage.retentionDays} days after review.`)
     )
   );
 }

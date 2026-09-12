@@ -104,8 +104,10 @@ export async function getAdminCatalog() {
   };
 }
 
-/** Rows for the Google Sheets catalogue mirror. */
-export async function getCatalogForSheets() {
+/** Rows for the Google Sheets catalogue mirror, optionally limited by SKU. */
+export async function getCatalogForSheets({ skus = null } = {}) {
+  const wanted = skus ? [...new Set(skus.filter(Boolean))] : null;
+  if (wanted?.length === 0) return [];
   const rows = await query(`
     select i.*,
            json_build_object(
@@ -113,8 +115,9 @@ export async function getCatalogForSheets() {
            ) as category
     from items i
     join categories c on c.id = i.category_id
+    ${wanted ? 'where i.sku = any($1::text[])' : ''}
     order by c.sort_order, i.sort_order
-  `);
+  `, wanted ? [wanted] : []);
   return rows;
 }
 

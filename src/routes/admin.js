@@ -16,10 +16,11 @@ const router = Router();
 
 router.get('/admin/summary', async (req, res, next) => {
   try {
-    const [stats, low, settings] = await Promise.all([
+    const [stats, low, settings, proofStorage] = await Promise.all([
       orders.getStats(),
       catalog.getLowStockItems(),
       catalog.getSettings(),
+      orders.getProofStorageStats(),
     ]);
     res.json({
       stats,
@@ -43,6 +44,7 @@ router.get('/admin/summary', async (req, res, next) => {
         paynowDynamic: Boolean(config.paynow.proxyValue),
         lowStockAlertAt: config.store.lowStockAlertAt,
       },
+      proofStorage,
     });
   } catch (err) { next(err); }
 });

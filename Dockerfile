@@ -8,7 +8,7 @@ RUN npm ci --omit=dev
 
 COPY src ./src
 COPY public ./public
-COPY supabase ./supabase
+COPY db ./db
 COPY scripts ./scripts
 
 ENV NODE_ENV=production

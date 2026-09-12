@@ -107,6 +107,8 @@ export const config = {
     /** Telegram user ids that are admins no matter what the DB says. */
     bootstrapAdminIds: idList('ADMIN_TELEGRAM_IDS'),
     maxUploadBytes: intOf('MAX_UPLOAD_BYTES', 10 * 1024 * 1024),
+    /** Remove images after settlement while retaining the order and receipt. */
+    proofRetentionDays: intOf('PROOF_RETENTION_DAYS', 60),
     /**
      * Units left at which the admins get told to restock.
      *

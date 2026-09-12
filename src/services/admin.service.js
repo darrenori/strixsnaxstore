@@ -1,6 +1,8 @@
 import { query, one, rpc, parseDbError } from '../lib/db.js';
 import * as sheets from '../lib/sheets.js';
-import { syncCatalogToSheets, queueStockFollowUp } from './collation.service.js';
+import {
+  syncCatalogToSheets, syncCatalogItemsToSheets, queueStockFollowUp,
+} from './collation.service.js';
 import { getCatalogForSheets } from './catalog.service.js';
 import log from '../lib/logger.js';
 
@@ -42,7 +44,7 @@ export async function setStock({ itemId, admin, count, note, collate = true }) {
   } catch (err) {
     throw toAdminError(err, 'Could not update stock.');
   }
-  if (collate) queueStockFollowUp();
+  if (collate) await queueStockFollowUp([item.sku]);
 
   log.info('Stock set', { sku: item.sku, count, admin: admin.telegram_id });
   return item;
@@ -56,7 +58,7 @@ export async function adjustStock({ itemId, admin, delta, reason = 'manual_adjus
   } catch (err) {
     throw toAdminError(err, 'Could not adjust stock.');
   }
-  queueStockFollowUp();
+  await queueStockFollowUp([item.sku]);
 
   log.info('Stock adjusted', { sku: item.sku, delta, admin: admin.telegram_id });
   return item;
@@ -78,7 +80,7 @@ export async function bulkSetStock({ admin, entries }) {
     }
   }
 
-  queueStockFollowUp();
+  await queueStockFollowUp(results.filter((r) => r.ok).map((r) => r.item.sku));
   return results;
 }
 
@@ -156,7 +158,7 @@ export async function createItem({ admin, payload }) {
   }
 
   log.info('Item created', { sku: item.sku, admin: admin.telegram_id });
-  queueStockFollowUp();
+  await queueStockFollowUp([item.sku]);
   return item;
 }
 
@@ -191,7 +193,7 @@ export async function updateItem({ admin, itemId, patch }) {
   if (!item) throw new AdminError('No such item.', 'ITEM_NOT_FOUND', 404);
 
   log.info('Item updated', { sku: item.sku, fields: Object.keys(patch), admin: admin.telegram_id });
-  queueStockFollowUp();
+  await queueStockFollowUp([item.sku]);
   return item;
 }
 
@@ -203,7 +205,7 @@ export async function archiveItem({ admin, itemId }) {
   const item = await one('update items set is_active = false where id = $1 returning *', [itemId]);
   if (!item) throw new AdminError('No such item.', 'ITEM_NOT_FOUND', 404);
   log.info('Item archived', { sku: item.sku, admin: admin.telegram_id });
-  queueStockFollowUp();
+  await queueStockFollowUp([item.sku]);
   return item;
 }
 
@@ -382,14 +384,14 @@ export async function importCatalogFromSheets({ admin }) {
     if (!fields.length && (row.stock === null || row.stock === item.stock)) unchanged += 1;
   }
 
-  // One push at the end, not one per row: it restates the derived columns
-  // (Available, Low?, Updated At) that the edits have just invalidated, and
-  // puts back anything the importer refused to read. Awaited, because the
-  // admin who pressed the button is looking at the sheet.
-  await syncCatalogToSheets();
+  // Restate every known row read from the sheet, including malformed rows we
+  // refused to import. This preserves that correction behavior without
+  // clearing and rewriting unrelated rows.
+  const knownSkus = rows.map((row) => row.sku).filter((sku) => bySku.has(sku));
+  const mirrored = await syncCatalogItemsToSheets(knownSkus);
   // The ledger rows and the low-stock check ride along, so a restock typed
   // into the spreadsheet is indistinguishable from one typed into the panel.
-  queueStockFollowUp();
+  await queueStockFollowUp(mirrored ? [] : knownSkus);
 
   log.info('Catalogue imported from sheet', {
     changed: changed.length, stocked: stocked.length, skipped: skipped.length,

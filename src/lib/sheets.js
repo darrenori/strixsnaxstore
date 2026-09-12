@@ -42,7 +42,7 @@ export const TABS = {
     title: 'Stock Movements',
     headers: [
       'Timestamp (SGT)', 'SKU', 'Item', 'Delta', 'Balance After', 'Reason',
-      'Order Code', 'Admin', 'Note',
+      'Order Code', 'Admin', 'Note', 'Movement ID',
     ],
   },
 };
@@ -406,6 +406,28 @@ async function refreshOrderItemStatus(order) {
   });
 }
 
+function catalogRow(i) {
+  const available = Math.max((i.stock ?? 0) - (i.reserved ?? 0), 0);
+  return safeRow([
+    i.sku,
+    i.category?.kind === 'drink' ? 'Drink' : 'Snack',
+    i.category?.name ?? '',
+    i.category?.collection_point ?? '',
+    i.name,
+    i.variant ?? '',
+    i.description ?? '',
+    money(i.price_cents),
+    i.stock ?? 0,
+    i.reserved ?? 0,
+    available,
+    i.low_stock_at ?? 0,
+    available <= (i.low_stock_at ?? 0) ? 'LOW' : '',
+    i.is_active ? 'Yes' : 'No',
+    i.is_special ? 'Yes' : '',
+    sgt(i.updated_at),
+  ]);
+}
+
 /** Mirror the whole catalog into the "Items & Stock" tab. */
 export async function syncCatalog(rows) {
   if (!credentialsPresent()) return false;
@@ -415,27 +437,7 @@ export async function syncCatalog(rows) {
       const api = await client();
       await ensureTabs();
 
-      const values = rows.map((i) => {
-        const available = Math.max((i.stock ?? 0) - (i.reserved ?? 0), 0);
-        return safeRow([
-          i.sku,
-          i.category?.kind === 'drink' ? 'Drink' : 'Snack',
-          i.category?.name ?? '',
-          i.category?.collection_point ?? '',
-          i.name,
-          i.variant ?? '',
-          i.description ?? '',
-          money(i.price_cents),
-          i.stock ?? 0,
-          i.reserved ?? 0,
-          available,
-          i.low_stock_at ?? 0,
-          available <= (i.low_stock_at ?? 0) ? 'LOW' : '',
-          i.is_active ? 'Yes' : 'No',
-          i.is_special ? 'Yes' : '',
-          sgt(i.updated_at),
-        ]);
-      });
+      const values = rows.map(catalogRow);
 
       const lastColumn = columnLetter(TABS.catalog.headers.length - 1);
 
@@ -459,6 +461,65 @@ export async function syncCatalog(rows) {
       return true;
     } catch (err) {
       log.error('Sheets syncCatalog failed', { error: err.message });
+      return false;
+    }
+  });
+}
+
+/**
+ * Refresh only catalogue rows that changed.
+ *
+ * Routine sales and stock-takes normally touch one or two SKUs. Reading the
+ * SKU column once and batch-updating those rows avoids clearing and rewriting
+ * the complete catalogue after every movement. A newly-created SKU is
+ * appended; explicit "push menu" remains the full rebuild path.
+ */
+export async function syncCatalogItems(rows) {
+  if (!credentialsPresent()) return false;
+  if (!Array.isArray(rows) || rows.length === 0) return true;
+
+  return serialise(async () => {
+    try {
+      const api = await client();
+      await ensureTabs();
+
+      const existing = await api.spreadsheets.values.get({
+        spreadsheetId: config.sheets.spreadsheetId,
+        range: range(TABS.catalog, 'A:A'),
+      });
+      const rowBySku = new Map();
+      for (let i = 1; i < (existing.data.values ?? []).length; i += 1) {
+        const sku = existing.data.values[i]?.[0];
+        if (sku) rowBySku.set(sku, i + 1);
+      }
+
+      const updates = [];
+      const missing = [];
+      const lastColumn = columnLetter(TABS.catalog.headers.length - 1);
+      for (const item of rows) {
+        const cells = catalogRow(item);
+        const sheetRow = rowBySku.get(item.sku);
+        if (sheetRow) {
+          updates.push({
+            range: range(TABS.catalog, `A${sheetRow}:${lastColumn}${sheetRow}`),
+            values: [cells],
+          });
+        } else {
+          missing.push(cells);
+        }
+      }
+
+      if (updates.length) {
+        await api.spreadsheets.values.batchUpdate({
+          spreadsheetId: config.sheets.spreadsheetId,
+          requestBody: { valueInputOption: 'USER_ENTERED', data: updates },
+        });
+      }
+      if (missing.length) await append(TABS.catalog, missing);
+      log.info('Sheets catalog rows synced', { updated: updates.length, appended: missing.length });
+      return true;
+    } catch (err) {
+      log.error('Sheets syncCatalogItems failed', { error: err.message });
       return false;
     }
   });
@@ -553,7 +614,18 @@ export async function recordStockMovement(movements) {
 
   return serialise(async () => {
     try {
-      await append(TABS.stock, list.map((m) => safeRow([
+      const api = await client();
+      await ensureTabs();
+      const idColumn = columnLetter(columnOf(TABS.stock, 'Movement ID'));
+      const existing = await api.spreadsheets.values.get({
+        spreadsheetId: config.sheets.spreadsheetId,
+        range: range(TABS.stock, `${idColumn}:${idColumn}`),
+      });
+      const written = new Set((existing.data.values ?? []).flat().filter(Boolean));
+      const pending = list.filter((m) => !written.has(String(m.id)));
+      if (pending.length === 0) return true;
+
+      await append(TABS.stock, pending.map((m) => safeRow([
         sgt(m.created_at ?? new Date()),
         m.sku ?? '',
         m.item_name ?? '',
@@ -563,6 +635,7 @@ export async function recordStockMovement(movements) {
         m.order_code ?? '',
         m.actor_name ?? '',
         m.note ?? '',
+        m.id ?? '',
       ])));
       return true;
     } catch (err) {
@@ -573,6 +646,6 @@ export async function recordStockMovement(movements) {
 }
 
 export default {
-  sheetsEnabled, ensureTabs, upsertOrder, syncCatalog, readCatalogTab,
+  sheetsEnabled, ensureTabs, upsertOrder, syncCatalog, syncCatalogItems, readCatalogTab,
   recordStockMovement, sgt, TABS,
 };
