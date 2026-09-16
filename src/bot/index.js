@@ -122,7 +122,7 @@ export function createBot() {
         pending_review:   '🛍 Yours, payment being checked',
         paid:             '✅ Verified, all settled',
         rejected:         '⚠️ Rejected',
-        cancelled:        '✖️ Cancelled',
+        cancelled:        '❌ Cancelled',
         collected:        '📦 Collected',
       };
       const list = rows.map((o) =>
