@@ -84,15 +84,21 @@ async function attach(ctx, order, file) {
     bytes = await download(ctx, file.fileId);
   } catch (err) {
     if (err.message === 'TOO_LARGE') {
-      return ctx.reply('That image is over 10 MB. Send the screenshot itself rather than a full-size photo of it.');
+      return ctx.replyWithHTML(
+        ` <b>That's too big</b>\n\n. Just the screenshot will do!`
+      );
     }
     log.error('Proof download failed', { code: order.code, error: err.message });
-    return ctx.reply('Telegram would not give us that file. Try sending it again.');
+    return ctx.replyWithHTML(
+      ` <b>Couldn't fetch that file</b>\n\n Please try sending it again.`
+    );
   }
 
   const sniffed = sniffImage(bytes);
   if (!sniffed) {
-    return ctx.reply('That does not look like an image we can read. A JPG or PNG screenshot works best.');
+    return ctx.replyWithHTML(
+      `<b>Can't read that</b>\n\nA JPG or PNG screenshot is preferred!`
+    );
   }
 
   let updated;
@@ -108,7 +114,7 @@ async function attach(ctx, order, file) {
   } catch (err) {
     log.warn('Proof attach from Telegram failed', { code: order.code, error: err.message });
     return ctx.replyWithHTML(
-      `⚠️ ${esc(err.message)}\n\nOpen the store and check <b>${esc(order.code)}</b>.`
+      ` ${esc(err.message)}\n\nOpen the store and check <b>${esc(order.code)}</b>.`
     );
   }
 
@@ -117,10 +123,10 @@ async function attach(ctx, order, file) {
 
   const where = (updated.collectionPoints ?? []).join(' + ') || 'Blk B';
   return ctx.replyWithHTML(
-    `✅ <b>Got it!</b>\n\n` +
+    `<b>Got it!</b>\n\n` +
     `Screenshot saved against <b>${esc(updated.code)}</b> - $${updated.total}.\n\n` +
-    `🎉 Go and take your snacks from <b>${esc(where)}</b> now. An admin checks the ` +
-    `payment afterwards and you will hear from us only if something looks off.`
+    ` Collect your items :) <b>${esc(where)}</b> now.` +
+    `See you again!`
   );
 }
 
@@ -143,13 +149,17 @@ export async function handleProofPhoto(ctx, next) {
     // A document that is not an image: say so rather than going quiet, which
     // is what a broken bot looks like from the outside.
     if (ctx.message?.document) {
-      return ctx.reply('I can only read images. Send the payment screenshot as a photo.');
+      return ctx.replyWithHTML(
+        `<b>Images only</b>\n\nI can only read images. Send the payment screenshot as a photo.`
+      );
     }
     return next();
   }
 
   const user = ctx.state.user;
-  if (!user) return ctx.reply('Press /start first so we know who you are.');
+  if (!user) {
+    return ctx.replyWithHTML(`<b>Would be rude not to introduce yourself!</b>\n\nPress /start so we know who you are.`);
+  }
 
   const code = codeIn(ctx.message.caption, ctx.message.reply_to_message?.text);
   if (code) {
