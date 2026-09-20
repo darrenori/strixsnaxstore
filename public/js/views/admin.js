@@ -13,6 +13,29 @@ import api from '../api.js';
  * through to both Supabase and the Google Sheet.
  */
 
+/**
+ * A number input with the same -/+ stepper the shop counter uses.
+ *
+ * Every number an admin edits here is one they mostly change by one - a packet
+ * sold, a packet put back, a low-stock threshold nudged - and typing that on a
+ * phone keyboard means dismissing the keyboard again afterwards.
+ */
+function stepper(input, { min = 0, max = Number.MAX_SAFE_INTEGER, step = 1, label = 'value' } = {}) {
+  const bump = (delta) => el('button', {
+    class: 'qty__btn', type: 'button',
+    'aria-label': `${delta > 0 ? 'Increase' : 'Decrease'} ${label}`,
+    onClick: () => {
+      const current = Number.parseInt(input.value, 10) || 0;
+      const next = Math.min(max, Math.max(min, current + (delta * step)));
+      input.value = String(next);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      haptic('light');
+    },
+  }, delta > 0 ? '+' : '−');
+
+  return el('div', { class: 'qty qty--field' }, bump(-1), input, bump(1));
+}
+
 const TABS = [
   { id: 'queue',    label: '🔍 Verify' },
   { id: 'stock',    label: '📦 Stock' },
@@ -231,17 +254,6 @@ function renderStock(root) {
       refreshSaveState();
     });
 
-    const bump = (delta) => el('button', {
-      class: 'qty__btn', type: 'button',
-      'aria-label': `${delta > 0 ? 'Increase' : 'Decrease'} ${itemLabel(item)}`,
-      onClick: () => {
-        const current = Number.parseInt(input.value, 10) || 0;
-        input.value = String(Math.max(0, current + delta));
-        input.dispatchEvent(new Event('input'));
-        haptic('light');
-      },
-    }, delta > 0 ? '+' : '−');
-
     return el('div', { class: `stock-row ${item.isLow ? 'is-low' : ''}`.trim() },
       el('div', {},
         el('div', { class: 'stock-row__name' }, itemLabel(item)),
@@ -253,7 +265,7 @@ function renderStock(root) {
           (item.isActive ? '' : ' · HIDDEN'))
       ),
       el('div', { class: 'stock-row__ctrl' },
-        el('div', { class: 'qty' }, bump(-1), input, bump(1))
+        stepper(input, { max: 100000, label: itemLabel(item) })
       )
     );
   };
@@ -301,8 +313,14 @@ function itemForm(categories, onCreated) {
   const name = el('input', { class: 'input', maxlength: '80', placeholder: 'e.g. Hello Panda' });
   const variant = el('input', { class: 'input', maxlength: '60', placeholder: 'e.g. Strawberry' });
   const price = el('input', { class: 'input', type: 'number', min: '0', step: '0.05', placeholder: '1.20', inputmode: 'decimal' });
-  const stock = el('input', { class: 'input', type: 'number', min: '0', value: '0', inputmode: 'numeric' });
-  const lowAt = el('input', { class: 'input', type: 'number', min: '0', value: '5', inputmode: 'numeric' });
+  const stock = el('input', {
+    class: 'stock-input', type: 'number', min: '0', max: '100000',
+    value: '0', inputmode: 'numeric', 'aria-label': 'Opening stock',
+  });
+  const lowAt = el('input', {
+    class: 'stock-input', type: 'number', min: '0', max: '100000',
+    value: '5', inputmode: 'numeric', 'aria-label': 'Low stock at',
+  });
   const emoji = el('input', { class: 'input', maxlength: '4', placeholder: '🍫' });
   const desc = el('textarea', { class: 'textarea', maxlength: '280', placeholder: 'A short, tasty description' });
 
@@ -337,7 +355,7 @@ function itemForm(categories, onCreated) {
         haptic('success');
         toast(`${item.sku} added`, 'ok');
         name.value = ''; variant.value = ''; price.value = ''; desc.value = '';
-        stock.value = '0'; emoji.value = '';
+        stock.value = '0'; lowAt.value = '5'; emoji.value = '';
         special.checked = false; topPick.checked = false;
         onCreated();
       } catch (err) { haptic('error'); toast(err.message, 'error'); }
@@ -361,8 +379,12 @@ function itemForm(categories, onCreated) {
       el('div', { class: 'field' }, el('label', { class: 'field__label' }, 'Emoji'), emoji)
     ),
     el('div', { class: 'row' },
-      el('div', { class: 'field' }, el('label', { class: 'field__label' }, 'Opening stock'), stock),
-      el('div', { class: 'field' }, el('label', { class: 'field__label' }, 'Low stock at'), lowAt)
+      el('div', { class: 'field' },
+        el('label', { class: 'field__label' }, 'Opening stock'),
+        stepper(stock, { max: 100000, label: 'opening stock' })),
+      el('div', { class: 'field' },
+        el('label', { class: 'field__label' }, 'Low stock at'),
+        stepper(lowAt, { max: 100000, label: 'low stock threshold' }))
     ),
     el('div', { class: 'field' }, el('label', { class: 'field__label' }, 'Description'), desc),
     el('div', { class: 'row' }, check('Special', special), check('Top pick', topPick)),

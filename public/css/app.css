@@ -122,6 +122,13 @@ img { max-width: 100%; display: block; }
   align-items: center;
   padding: 0 6px;
 }
+/* Each slot is pinned to its own column. The back chevron is hidden on most
+   screens, and without these the title and the cart slid left into the empty
+   columns behind it: the wordmark left-aligned in a 44px box and the trolley
+   parked 44px short of the right edge. */
+.topbar__back  { grid-column: 1; }
+.topbar__title { grid-column: 2; }
+.topbar__cart  { grid-column: 3; }
 .topbar__back {
   font-size: 30px;
   line-height: 1;
@@ -129,7 +136,7 @@ img { max-width: 100%; display: block; }
   font-weight: 700;
   padding: 0 0 4px;
 }
-.topbar__title { text-align: center; display: grid; gap: 0; }
+.topbar__title { text-align: center; display: grid; gap: 0; min-width: 0; }
 .topbar__word {
   font-family: var(--font-display);
   font-size: 18px;
@@ -151,12 +158,15 @@ img { max-width: 100%; display: block; }
   display: grid;
   place-items: center;
 }
-/* The trolley shifts down and left so the count sits in the corner beside it
-   rather than on top of it. Centred, the badge covered the basket itself and
-   the two read as one smudged glyph. */
 .topbar__glyph {
   font-size: 20px;
   line-height: 1;
+}
+/* Only once a count is showing does the trolley shift down and left, so the
+   badge sits in the corner beside it rather than on top of it. Centred under
+   the badge the two read as one smudged glyph - but an empty cart has no
+   badge to dodge, and the offset just left the trolley sitting crooked. */
+.topbar__cart:has(.topbar__count:not([hidden])) .topbar__glyph {
   transform: translate(-3px, 3px);
 }
 .topbar__count {
@@ -266,21 +276,36 @@ img { max-width: 100%; display: block; }
      and leaves the letters legible. */
   text-shadow: 1px 1px 0 var(--red);
 }
+/* Where to collect, as a caption rather than as controls.
+   These two used to be paper pills with a navy border and the same offset
+   shadow every button on this screen carries, so they read as the first thing
+   worth tapping on the page - and nothing happened when you did. They say
+   where the shelves are; they now look like it. */
 .hero__points {
   display: flex;
-  gap: 8px;
+  gap: 2px 10px;
   flex-wrap: wrap;
+  align-items: baseline;
   justify-content: center;
+}
+.hero__label {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
 }
 .hero__point {
   font-family: var(--font-script);
   font-size: 14px;
   color: var(--heading);
-  background: var(--paper);
-  border: 2px solid var(--navy);
-  border-radius: var(--r-pill);
-  padding: 3px 14px 5px;
-  box-shadow: var(--shadow-block);
+}
+/* The separator trails the point before it rather than leading the one after,
+   so when the line wraps the dot stays behind on the first line instead of
+   opening the second one. */
+.hero__point:not(:last-child)::after {
+  content: ' ·';
+  color: var(--ink-faint);
 }
 .hero__note {
   margin: 0;
@@ -428,6 +453,11 @@ img { max-width: 100%; display: block; }
   color: var(--heading);
   text-transform: uppercase;
   margin: 0;
+  /* A grid `1fr` track still refuses to shrink below its longest word, so a
+     name like CHOCOLATE-STRAWBERRY pushed the price and the button off the
+     right of the screen instead of wrapping. */
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .item__variant { font-weight: 600; opacity: .8; text-transform: none; }
 .item__price {
@@ -437,6 +467,11 @@ img { max-width: 100%; display: block; }
   font-size: 15.5px;
   color: var(--red);
   white-space: nowrap;
+  /* Fixed-width digits, right-aligned over a floor wide enough for $10.00:
+     $1.20 and $12.50 now end on the same pixel down the whole menu. */
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  min-width: 4.4ch;
 }
 .item__desc {
   grid-area: desc;
@@ -444,6 +479,8 @@ img { max-width: 100%; display: block; }
   color: var(--ink-soft);
   margin: 2px 0 4px;
   max-width: 46ch;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .item__meta {
   grid-area: meta;
@@ -461,6 +498,11 @@ img { max-width: 100%; display: block; }
   justify-self: end;
   align-self: center;
   padding-left: 4px;
+  /* ADD, SOLD OUT and the stepper all reserve the same width, which is what
+     keeps the price column straight regardless of what is in the cart. */
+  min-width: var(--action-w);
+  display: flex;
+  justify-content: flex-end;
 }
 
 .tag {
@@ -483,10 +525,12 @@ img { max-width: 100%; display: block; }
   font-family: var(--font-display);
   font-size: 11px;
   letter-spacing: .06em;
-  padding: 7px 15px 8px;
+  padding: 7px 10px 8px;
   border-radius: var(--r-pill);
   box-shadow: 0 2px 0 var(--red-ink);
   transition: transform .1s ease;
+  width: var(--action-w);
+  white-space: nowrap;
 }
 .add-btn:active { transform: translateY(2px); box-shadow: none; }
 .add-btn:disabled { background: var(--ink-faint); box-shadow: none; cursor: not-allowed; }
@@ -495,6 +539,7 @@ img { max-width: 100%; display: block; }
 .qty {
   display: inline-flex;
   align-items: center;
+  justify-content: space-between;
   gap: 2px;
   background: var(--surface);
   border: 2px solid var(--navy);
@@ -502,6 +547,7 @@ img { max-width: 100%; display: block; }
   padding: 2px;
   box-shadow: var(--shadow-block);
 }
+.item__action .qty { width: var(--action-w); }
 .qty__btn {
   width: 28px; height: 28px;
   border-radius: 50%;
@@ -516,7 +562,11 @@ img { max-width: 100%; display: block; }
   font-family: var(--font-menu);
   font-weight: 800;
   font-size: 14px;
+  /* 9 and 10 are the same width, so the +/- buttons stop jumping sideways as
+     the count goes up. */
+  font-variant-numeric: tabular-nums;
 }
+.qty__btn { flex: none; }
 
 /* Grouped flavours - the poster's "NISSIN CUP NOODLES $1.90" plus its bullets */
 .group__head {
@@ -524,7 +574,10 @@ img { max-width: 100%; display: block; }
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
-  padding: 13px 0 3px;
+  /* The right padding is the menu rows' button column, so a group's price
+     lands in the same column as every other price on the page rather than
+     sticking out past them on its own. */
+  padding: 13px calc(var(--action-w) + 16px) 3px 0;
   border-top: 1px solid var(--border);
 }
 .section__body > .group__head:first-child { border-top: none; }
@@ -536,6 +589,8 @@ img { max-width: 100%; display: block; }
   color: var(--heading);
   text-transform: uppercase;
   margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .group__price {
   font-family: var(--font-menu);
@@ -543,6 +598,9 @@ img { max-width: 100%; display: block; }
   font-size: 15.5px;
   color: var(--red);
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  min-width: 4.4ch;
 }
 .group__desc {
   font-size: 12.5px;
@@ -728,13 +786,27 @@ img { max-width: 100%; display: block; }
    block and not the line above it. */
 .cart-line:last-of-type,
 .cart-line:has(+ .totals) { border-bottom: none; }
-.cart-line__name { font-family: var(--font-menu); font-weight: 700; font-size: 14.5px; color: var(--heading); }
-.cart-line__sub  { font-size: 11.5px; color: var(--ink-faint); align-self: center; }
-.cart-line__total { font-family: var(--font-menu); font-weight: 800; color: var(--red); white-space: nowrap; text-align: right; }
+.cart-line__name {
+  font-family: var(--font-menu); font-weight: 700; font-size: 14.5px; color: var(--heading);
+  min-width: 0; overflow-wrap: anywhere;
+}
+.cart-line__sub  { font-size: 11.5px; color: var(--ink-faint); align-self: center; min-width: 0; overflow-wrap: anywhere; }
+.cart-line__total {
+  font-family: var(--font-menu); font-weight: 800; color: var(--red);
+  white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums;
+}
 .cart-line__ctrl { grid-column: 2; justify-self: end; }
 
 .totals { margin-top: 10px; padding-top: 14px; border-top: 2px solid var(--border-strong); }
-.totals__row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 14px; }
+.totals__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.totals__row > :last-child { white-space: nowrap; text-align: right; }
 .totals__row--grand {
   font-family: var(--font-display);
   font-size: 17px;
@@ -759,6 +831,7 @@ img { max-width: 100%; display: block; }
   font-size: 32px;
   color: var(--red);
   line-height: 1.1;
+  font-variant-numeric: tabular-nums;
 }
 .qr-card__code {
   display: inline-block;
@@ -933,19 +1006,26 @@ img { max-width: 100%; display: block; }
 
 .stock-row {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 6px 10px;
   align-items: center;
   padding: 11px 0;
   border-bottom: 1px solid var(--border);
 }
+/* Without this the SKU line - which is one long unbroken run of dots and
+   dashes - widened the first column until the stepper hung off the screen. */
+.stock-row > * { min-width: 0; }
 /* The divider under the last row lands on the card's own edge. */
 .stock-row:last-child { border-bottom: none; padding-bottom: 2px; }
-.stock-row__name { font-family: var(--font-menu); font-weight: 700; font-size: 14px; color: var(--heading); }
-.stock-row__sub { font-size: 11px; color: var(--ink-faint); }
-.stock-row__ctrl { display: flex; align-items: center; gap: 6px; }
+.stock-row__name {
+  font-family: var(--font-menu); font-weight: 700; font-size: 14px; color: var(--heading);
+  overflow-wrap: anywhere;
+}
+.stock-row__sub { font-size: 11px; color: var(--ink-faint); overflow-wrap: anywhere; }
+.stock-row__ctrl { display: flex; align-items: center; gap: 6px; flex: none; }
 .stock-input {
   width: 62px;
+  font-variant-numeric: tabular-nums;
   padding: 7px 8px;
   text-align: center;
   border: 2px solid var(--border-strong);
@@ -956,6 +1036,21 @@ img { max-width: 100%; display: block; }
   font-size: 15px;
 }
 .stock-input.is-dirty { border-color: var(--gold-deep); background: #fffaea; }
+/* The same stepper as a full-width form field, for the numbers on the New
+   item form. 16px on the input because anything smaller makes iOS zoom the
+   page in when it takes focus. */
+.field > .qty--field { width: 100%; }
+.field > .qty--field > .stock-input {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  font-size: 16px;
+  border: none;
+  background: transparent;
+  padding: 7px 2px;
+}
+.field > .qty--field > .stock-input:focus { outline: none; }
+.qty--field:focus-within { border-color: var(--blue); }
 .stock-row.is-low .stock-row__name::after {
   content: 'LOW';
   font-family: var(--font-body);

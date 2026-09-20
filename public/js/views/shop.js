@@ -212,6 +212,7 @@ function hero(store) {
     ),
     el('p', { class: 'hero__open' }, 'WE ARE OPEN 24/7'),
     el('div', { class: 'hero__points' },
+      el('span', { class: 'hero__label' }, 'Collect at'),
       el('span', { class: 'hero__point' }, '🐼 Blk B Lounge'),
       el('span', { class: 'hero__point' }, '🥤 Blk B Pantry')
     ),

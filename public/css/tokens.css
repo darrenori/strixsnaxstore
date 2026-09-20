@@ -72,6 +72,10 @@
 
   --gutter: 16px;
   --header-h: 56px;
+  /* Every menu row ends in one control - ADD, SOLD OUT or the +/- stepper -
+     and they are all this wide, so the prices in front of them line up down
+     the page instead of stepping in and out with the width of a word. */
+  --action-w: 94px;
   /* The checker strip, the bar itself and its rule. Anything that sticks
      underneath the header has to clear all three or the page scrolls through
      the gap. */

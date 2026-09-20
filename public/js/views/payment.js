@@ -1,6 +1,6 @@
 import { el, money, toast, statusPill, itemLabel, relTime } from '../ui.js';
 import { navigate } from '../store.js';
-import { haptic, confirm, tg } from '../tg.js';
+import { haptic, confirm } from '../tg.js';
 import api from '../api.js';
 
 /**
@@ -133,13 +133,6 @@ function handover(order, onSent) {
     }
   });
 
-  const close = tg?.close
-    ? el('button', {
-        class: 'btn btn--ghost mt', type: 'button',
-        onClick: () => tg.close(),
-      }, 'CLOSE AND OPEN THE CHAT')
-    : null;
-
   return el('section', { class: 'card' },
     el('h2', { class: 'card__title' }, 'Payment proof'),
     el('ol', { class: 'steps' },
@@ -152,8 +145,7 @@ function handover(order, onSent) {
       'The bot will message you with this order code. Reply to that message '
       + 'with your screenshot and your snacks are yours right away.'),
     send,
-    status,
-    close
+    status
   );
 }
 
@@ -268,10 +260,16 @@ export function renderPayment(params) {
       root.append(waitingCard(order, paint), receipt(order));
     }
 
-    root.append(el('button', {
-      class: 'btn btn--navy mt', type: 'button',
-      onClick: () => navigate('orders'),
-    }, 'ALL MY ORDERS'));
+    // An order still waiting to be paid gets two actions and no more: send the
+    // screenshot, or cancel. Anything else on this screen competes with the one
+    // step that actually moves the order along, and the Orders tab is already
+    // sitting at the bottom of every screen.
+    if (!isOpen) {
+      root.append(el('button', {
+        class: 'btn btn--navy mt', type: 'button',
+        onClick: () => navigate('orders'),
+      }, 'ALL MY ORDERS'));
+    }
   };
 
   if (prefetched) {
