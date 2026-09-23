@@ -365,7 +365,7 @@ export async function approveOrder({ orderId, admin, note }) {
 
   // Approving an order that never had a screenshot settles its stock here.
   const items = await loadItems(order.id);
-  await queueStockFollowUp(items.map((item) => item.sku));
+  await queueStockFollowUp(items.map((item) => item.sku), { waitForAttempt: true });
 
   return toPublicOrder(order, items);
 }

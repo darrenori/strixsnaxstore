@@ -158,14 +158,15 @@ export function kickJobRunner() {
     runnerRequested = true;
     return activeRunner;
   }
-  activeRunner = drainBackgroundJobs()
+  activeRunner = (async () => {
+    do {
+      runnerRequested = false;
+      await drainBackgroundJobs();
+    } while (runnerRequested);
+  })()
     .catch((err) => log.error('Background job runner failed', { error: err.message }))
     .finally(() => {
       activeRunner = null;
-      if (runnerRequested) {
-        runnerRequested = false;
-        kickJobRunner();
-      }
     });
   return activeRunner;
 }
@@ -420,7 +421,7 @@ export async function checkLowStock() {
  * all end here, so the ledger tab, the stock column and the admins' low-stock
  * alerts cannot drift apart from the database or from each other.
  */
-export async function queueStockFollowUp(skus = []) {
+export async function queueStockFollowUp(skus = [], { waitForAttempt = false } = {}) {
   const wanted = [...new Set(skus.filter(Boolean))];
   const jobs = [
     { kind: 'stock_ledger_sync', key: 'singleton' },
@@ -429,7 +430,16 @@ export async function queueStockFollowUp(skus = []) {
   ].filter((job) => sheets.sheetsEnabled() || job.kind === 'low_stock_check');
 
   const durable = await enqueueJobs(jobs);
-  if (!durable) {
+  if (durable && waitForAttempt) {
+    // Serverless runtimes may freeze as soon as the HTTP response is sent.
+    // Admin approval waits for this attempt so the stock row and ledger are
+    // current when the reviewer opens the sheet; failures remain queued.
+    await kickJobRunner();
+  } else if (!durable && waitForAttempt) {
+    await syncStockLedger();
+    await syncCatalogItemsToSheets(wanted);
+    await checkLowStock();
+  } else if (!durable) {
     queue('Stock follow-up', async () => {
       await syncStockLedger();
       await syncCatalogItemsToSheets(wanted);

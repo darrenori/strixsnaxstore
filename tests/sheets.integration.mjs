@@ -27,6 +27,7 @@ const tabs = new Map();
 let nextSheetId = 1;
 const calls = [];
 const rejections = [];
+let catalogWriteDelayMs = 0;
 
 function addTab(title, { rowCount = 1000, columnCount = 26 } = {}) {
   tabs.set(title, { title, rows: [], rowCount, columnCount, sheetId: (nextSheetId += 1) });
@@ -163,8 +164,19 @@ const sheetsStub = http.createServer((req, res) => {
 
       // values.batchUpdate
       if (req.method === 'POST' && path.endsWith('/values:batchUpdate')) {
-        for (const entry of body.data ?? []) writeRange(entry.range, entry.values);
-        return json(res, 200, { totalUpdatedCells: 1 });
+        const write = () => {
+          for (const entry of body.data ?? []) writeRange(entry.range, entry.values);
+          json(res, 200, { totalUpdatedCells: 1 });
+        };
+        const updatesCatalog = (body.data ?? []).some((entry) => entry.range.includes('Items & Stock'));
+        if (updatesCatalog && catalogWriteDelayMs > 0) {
+          const delay = catalogWriteDelayMs;
+          catalogWriteDelayMs = 0;
+          setTimeout(write, delay);
+          return;
+        }
+        write();
+        return;
       }
 
       const valueMatch = path.match(/\/values\/(.+?)(?::append|:clear)?$/);
@@ -399,16 +411,22 @@ console.log('\n- a sale is a stock movement, and shows up as one -');
 
 console.log('\n- approving refreshes the same row again -');
 {
+  const milk = rows('Items & Stock').find((r) => r?.[0] === 'HP-MILK');
+  milk[8] = '999';
+  catalogWriteDelayMs = 200;
   const approved = await call(`/api/admin/orders/${order.id}/approve`, { as: ADMIN, method: 'POST' });
   check('approval succeeds', approved.status === 200, JSON.stringify(approved.body).slice(0, 120));
 
-  await settle();
   const matching = rows('Orders').filter((r) => r?.[0] === order.code);
   check('still one row, not two', matching.length === 1, `got ${matching.length}`);
   check('marked paid', matching[0]?.[2] === 'paid', matching[0]?.[2]);
   check('naming who verified it', matching[0]?.[13] === 'Boss', matching[0]?.[13]);
   check('and when', /\d{4}-\d{2}-\d{2} /.test(matching[0]?.[14] ?? ''), matching[0]?.[14]);
+  check('the stock row is current before approval returns', milk?.[8] === '22', milk?.[8]);
   check('no stock moved twice', rows('Stock Movements').filter((r) => r?.[6] === order.code).length === 1);
+  const { one } = await import('../src/lib/db.js');
+  check('approval leaves no due stock-sync jobs',
+    Number((await one('select count(*) as n from background_jobs where run_after <= now()')).n) === 0);
 }
 
 console.log('\n- a stock take writes the ledger and the mirror -');
