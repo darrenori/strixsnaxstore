@@ -38,6 +38,12 @@ export const TABS = {
       'Active', 'Special', 'Updated At (SGT)',
     ],
   },
+  payments: {
+    title: 'Payments',
+    headers: [
+      'Purchase ID', 'Time (SGT)', 'Items Bought', 'Screenshot', 'Price (SGD)', 'Status',
+    ],
+  },
   stock: {
     title: 'Stock Movements',
     headers: [
@@ -359,6 +365,7 @@ export async function upsertOrder({ order, items, user, knownRow = null }) {
           requestBody: { values: [cells] },
         });
         await refreshOrderItemStatus(order);
+        await upsertPayment({ order, items });
         return row;
       }
 
@@ -372,6 +379,7 @@ export async function upsertOrder({ order, items, user, knownRow = null }) {
           order.status,
         ]))
       );
+      await upsertPayment({ order, items });
       return written;
     } catch (err) {
       log.error('Sheets upsertOrder failed', { code: order?.code, error: err.message });
@@ -404,6 +412,77 @@ async function refreshOrderItemStatus(order) {
       })),
     },
   });
+}
+
+/**
+ * Whether an order belongs on the Payments tab.
+ *
+ * An order nobody has paid for is not a payment, so the tab starts at the
+ * screenshot (or at an approval, which an admin can give without one).
+ */
+function hasPayment(order) {
+  return Boolean(
+    order.payment_proof_id || order.proof_source || ['paid', 'collected'].includes(order.status)
+  );
+}
+
+/**
+ * Where the payment screenshot is, for a person reading the sheet.
+ *
+ * Screenshots deliberately have no public URL (see the proof route in
+ * routes/admin.js), so this is a reference to look up in the admin panel, not
+ * a link. Settled images are pruned after PROOF_RETENTION_DAYS, which nulls
+ * the id but leaves the source, and the cell says so rather than going blank.
+ */
+function screenshotRef(order) {
+  const via = order.proof_source ? ` (${order.proof_source})` : '';
+  if (order.payment_proof_id) return `${order.payment_proof_id}${via}`;
+  if (order.proof_source) return `Deleted after retention period${via}`;
+  return 'None';
+}
+
+/**
+ * Add the order to the Payments tab, or refresh the row it has there.
+ *
+ * Purchase ID and Time are written once and left alone: Time is when the
+ * payment came in, and re-stating it on every refresh would let a pruned
+ * screenshot move it. Everything from Items Bought onwards is restated.
+ *
+ * Runs inside upsertOrder's serialised block, and fails on its own: a payment
+ * row that did not land must not cost the order the Orders row it already got.
+ */
+async function upsertPayment({ order, items }) {
+  try {
+    const api = await client();
+    if (!api || !hasPayment(order)) return;
+
+    const tail = safeRow([
+      items
+        .map((i) => `${i.quantity}x ${[i.name, i.variant].filter(Boolean).join(' - ')}`)
+        .join('; '),
+      screenshotRef(order),
+      money(order.total_cents),
+      order.status,
+    ]);
+
+    const row = (await findRowsByCode(TABS.payments, order.code))[0] ?? 0;
+    if (row > 1) {
+      const first = columnLetter(columnOf(TABS.payments, 'Items Bought'));
+      const last = columnLetter(TABS.payments.headers.length - 1);
+      await api.spreadsheets.values.update({
+        spreadsheetId: config.sheets.spreadsheetId,
+        range: range(TABS.payments, `${first}${row}:${last}${row}`),
+        valueInputOption: 'USER_ENTERED',
+        requestBody: { values: [tail] },
+      });
+      return;
+    }
+
+    const paidAt = order.proof_uploaded_at ?? order.reviewed_at ?? order.created_at;
+    await append(TABS.payments, [[...safeRow([order.code, sgt(paidAt)]), ...tail]]);
+  } catch (err) {
+    log.error('Sheets upsertPayment failed', { code: order?.code, error: err.message });
+  }
 }
 
 function catalogRow(i) {
@@ -606,6 +685,52 @@ export async function readCatalogTab() {
   return out;
 }
 
+/**
+ * Stock levels and restock flags, read from the "Items & Stock" tab.
+ *
+ * For a script or report that wants "what needs restocking" without opening
+ * the sheet. Read-only on purpose: the database holds the real count, so a
+ * stock level is changed with a stock-take (admin.service setStock /
+ * bulkSetStock) or by editing the tab and running SYNC FROM SHEET, both of
+ * which go through the ledger and then refresh this tab.
+ *
+ * `needsRestock` uses Available (stock less what open orders have reserved),
+ * the same comparison the Low? column makes.
+ */
+export async function readInventory() {
+  const api = await client();
+  if (!api) return null;
+
+  const tab = TABS.catalog;
+  const lastColumn = columnLetter(tab.headers.length - 1);
+  const res = await api.spreadsheets.values.get({
+    spreadsheetId: config.sheets.spreadsheetId,
+    range: range(tab, `A2:${lastColumn}`),
+  });
+
+  const at = (row, header) => String(row[columnOf(tab, header)] ?? '').trim();
+  const count = (raw) => {
+    const n = Number(raw);
+    return raw !== '' && Number.isFinite(n) ? n : null;
+  };
+
+  return (res.data.values ?? [])
+    .filter((row) => at(row, 'SKU'))
+    .map((row) => {
+      const stock = count(at(row, 'Stock'));
+      const available = count(at(row, 'Available')) ?? stock;
+      const restockAt = count(at(row, 'Low Stock At'));
+      return {
+        sku: at(row, 'SKU'),
+        name: [at(row, 'Name'), at(row, 'Variant')].filter(Boolean).join(' - '),
+        stock,
+        available,
+        restockAt,
+        needsRestock: available !== null && restockAt !== null && available <= restockAt,
+      };
+    });
+}
+
 /** Append stock movements to the ledger tab. Takes one or many. */
 export async function recordStockMovement(movements) {
   if (!credentialsPresent()) return false;
@@ -647,5 +772,5 @@ export async function recordStockMovement(movements) {
 
 export default {
   sheetsEnabled, ensureTabs, upsertOrder, syncCatalog, syncCatalogItems, readCatalogTab,
-  recordStockMovement, sgt, TABS,
+  readInventory, recordStockMovement, sgt, TABS,
 };

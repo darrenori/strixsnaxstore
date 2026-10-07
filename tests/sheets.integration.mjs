@@ -304,7 +304,7 @@ console.log('\n- the tabs are built on a spreadsheet nobody prepared -');
   check('ensureTabs succeeds', ok === true);
   check('no range was refused', rejections.length === 0, rejections.join(' | '));
 
-  for (const title of ['Orders', 'Order Items', 'Items & Stock', 'Stock Movements']) {
+  for (const title of ['Orders', 'Order Items', 'Items & Stock', 'Payments', 'Stock Movements']) {
     check(`"${title}" exists`, tabs.has(title));
   }
   check('the header row is written',
@@ -349,6 +349,7 @@ let order;
   check('the total', row?.[8] === '2.40', row?.[8]);
   check('the note', row?.[11] === 'ring the bell', row?.[11]);
   check('and no proof yet', row?.[12] === 'No', row?.[12]);
+  check('an unpaid order is not a payment', !rowFor('Payments', order.code));
 
   const lines = rows('Order Items').filter((r) => r?.[0] === order.code);
   check('one row per line item', lines.length === 1, `got ${lines.length}`);
@@ -393,6 +394,14 @@ console.log('\n- the screenshot updates the row that is already there -');
   const lines = rows('Order Items').filter((r) => r?.[0] === order.code);
   check('the line items say pending_review too', lines.every((l) => l[10] === 'pending_review'),
     lines.map((l) => l[10]).join(','));
+
+  const payment = rowFor('Payments', order.code);
+  check('the screenshot puts the order on the Payments tab', Boolean(payment), 'no row');
+  check('stamped with a time', /\d{4}-\d{2}-\d{2} /.test(payment?.[1] ?? ''), payment?.[1]);
+  check('listing what was bought', /2x /.test(payment?.[2] ?? ''), payment?.[2]);
+  check('referencing the screenshot', /^[0-9a-f-]{36} \(/.test(payment?.[3] ?? ''), payment?.[3]);
+  check('at the order total', payment?.[4] === '2.40', payment?.[4]);
+  check('awaiting review', payment?.[5] === 'pending_review', payment?.[5]);
 }
 
 console.log('\n- a sale is a stock movement, and shows up as one -');
@@ -423,6 +432,10 @@ console.log('\n- approving refreshes the same row again -');
   check('naming who verified it', matching[0]?.[13] === 'Boss', matching[0]?.[13]);
   check('and when', /\d{4}-\d{2}-\d{2} /.test(matching[0]?.[14] ?? ''), matching[0]?.[14]);
   check('the stock row is current before approval returns', milk?.[8] === '22', milk?.[8]);
+  await settle();
+  const payments = rows('Payments').filter((r) => r?.[0] === order.code);
+  check('the payment row is refreshed, not duplicated', payments.length === 1, `got ${payments.length}`);
+  check('and reads paid', payments[0]?.[5] === 'paid', payments[0]?.[5]);
   check('no stock moved twice', rows('Stock Movements').filter((r) => r?.[6] === order.code).length === 1);
   const { one } = await import('../src/lib/db.js');
   check('approval leaves no due stock-sync jobs',
@@ -448,6 +461,14 @@ console.log('\n- a stock take writes the ledger and the mirror -');
 
   const row = rows('Items & Stock').find((r) => r?.[0] === 'HP-MILK');
   check('the mirror agrees', row?.[8] === '30', row?.[8]);
+
+  const { readInventory } = await import('../src/lib/sheets.js');
+  const inventory = await readInventory();
+  const entry = inventory?.find((i) => i.sku === 'HP-MILK');
+  check('readInventory reads the stock level back', entry?.stock === 30, JSON.stringify(entry));
+  check('with its restock threshold', Number.isInteger(entry?.restockAt), JSON.stringify(entry));
+  check('and a restock flag that matches the Low? column',
+    inventory?.every((i) => i.needsRestock === (rows('Items & Stock').find((r) => r?.[0] === i.sku)?.[12] === 'LOW')));
 }
 
 console.log('\n- the sheet edits back -');
