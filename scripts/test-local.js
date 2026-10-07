@@ -39,7 +39,7 @@ const SUITES = {
 };
 
 const asked = process.argv.slice(2).filter((a) => !a.startsWith('-'));
-const unknown = asked.filter((name) => !SUITES[name]);
+const unknown = asked.filter((name) => !(name in SUITES));
 if (unknown.length) {
   console.error(`Unknown suite: ${unknown.join(', ')}`);
   console.error(`Available: ${Object.keys(SUITES).join(', ')}`);
@@ -115,6 +115,11 @@ async function runSuite(name) {
   });
 
   await server.stop();
+  // The socket server detaches its client on a later tick, and asks the
+  // database whether a transaction is open as it does. Closing the database
+  // first leaves that question to a torn-down WASM module, which throws
+  // outside any promise and takes the whole runner down with it.
+  await new Promise((r) => { setTimeout(r, 250); });
   await db.close();
   return code;
 }
