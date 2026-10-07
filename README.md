@@ -42,6 +42,15 @@ screenshot, and every confirmed sale written into Google Sheets.
   plus live `Items & Stock` and `Stock Movements` tabs. Each status change
   refreshes the row it already has, so the tab tracks the shop instead of
   lagging a day behind it.
+- `Payments` is the short ledger of money in: one row per paid order, written
+  when the screenshot arrives (or on approval) - Purchase ID, Time, Items
+  Bought, Screenshot, Price, Status. Screenshots have no public URL, so the
+  Screenshot cell holds the proof's id and source to look up in the admin
+  panel. Orders paid before the tab existed: `npm run sheets:payments`.
+- `Items & Stock` doubles as the inventory view: `Stock`, `Available`, the
+  `Low Stock At` restock threshold and a `Low?` flag per item.
+  `readInventory()` in `src/lib/sheets.js` returns the same as data, with a
+  `needsRestock` flag.
 - Every movement of stock lands in `Stock Movements`, sales included. The
   ledger tab used to show only what admins typed, which described a shop where
   nothing was ever sold.
@@ -166,7 +175,7 @@ npm run sheets:link -- "https://docs.google.com/spreadsheets/d/.../edit"
 ```
 
 That proves the service account can open the file before it writes anything,
-puts `GOOGLE_SHEETS_ID` and `SHEETS_ENABLED` into `.env`, and creates the four
+puts `GOOGLE_SHEETS_ID` and `SHEETS_ENABLED` into `.env`, and creates the five
 tabs. If the share did not take it says so and prints the address to share
 with, rather than leaving you looking at an empty sheet wondering.
 
@@ -349,7 +358,7 @@ Postgres compiled to WASM, so the same plpgsql and the same row locks - applies
 | `e2e` | 30 | the happy path: catalogue, pricing, proof upload, approval, stock |
 | `flows` | 65 | what happens when it goes wrong: rejection, cancellation, expiry, races, every guard |
 | `bot` | 74 | the real Telegram handlers driven through the webhook, against a stub Bot API, including the whole screenshot-in-the-chat flow and the low-stock alert |
-| `sheets` | 65 | the collation, against a stub that refuses the A1 ranges Google refuses |
+| `sheets` | 80 | the collation, against a stub that refuses the A1 ranges Google refuses |
 | `vercel` | 10 | the serverless request shape, including a screenshot upload on a pre-read body |
 
 The `sheets` suite exists because a Google outage must not stop somebody buying

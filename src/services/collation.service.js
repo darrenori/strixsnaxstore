@@ -180,12 +180,13 @@ const ORDER_SHEET_SQL = `
          o.subtotal_cents, o.total_cents, o.collection_points, o.note,
          o.payment_proof_id, o.payment_ref, o.proof_source, o.review_note,
          o.reviewed_at, o.sheet_row, o.created_at,
-         u.username,
+         u.username, p.created_at as proof_uploaded_at,
          a.first_name as reviewer_first, a.last_name as reviewer_last,
          a.username   as reviewer_username
     from orders o
     join app_users u on u.id = o.user_id
     left join app_users a on a.id = o.reviewed_by
+    left join payment_proofs p on p.id = o.payment_proof_id
    where o.id = $1
 `;
 
