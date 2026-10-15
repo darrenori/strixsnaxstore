@@ -361,11 +361,28 @@ export async function approveOrder({ orderId, admin, note }) {
     log.error('Order sheet sync failed', { code: order.code, error: err.message });
     return false;
   });
-  if (!synced) await queueOrderSync(orderId);
+  if (!synced) {
+    await queueOrderSync(orderId).catch((err) => {
+      // The payment decision is already committed in Postgres. A temporary
+      // queue or Sheets failure must not tell the admin that approval failed
+      // and tempt them to press the button again.
+      log.error('Order sheet retry could not be queued', {
+        code: order.code, error: err.message,
+      });
+    });
+  }
 
   // Approving an order that never had a screenshot settles its stock here.
   const items = await loadItems(order.id);
-  await queueStockFollowUp(items.map((item) => item.sku), { waitForAttempt: true });
+  await queueStockFollowUp(items.map((item) => item.sku), { waitForAttempt: true })
+    .catch((err) => {
+      // Stock was settled by approve_order (or earlier when the proof arrived).
+      // Keep the successful decision visible even if its spreadsheet mirror
+      // needs a later retry.
+      log.error('Approval stock follow-up failed', {
+        code: order.code, error: err.message,
+      });
+    });
 
   return toPublicOrder(order, items);
 }

@@ -440,6 +440,25 @@ console.log('\n- approving refreshes the same row again -');
   const { one } = await import('../src/lib/db.js');
   check('approval leaves no due stock-sync jobs',
     Number((await one('select count(*) as n from background_jobs where run_after <= now()')).n) === 0);
+
+  // The database decision is the source of truth. If the durable follow-up
+  // queue has a transient outage after that commit, retrying/viewing the
+  // approval must still return success instead of a misleading HTTP 500.
+  const { query } = await import('../src/lib/db.js');
+  await query(`
+    create or replace function test_fail_background_job_insert() returns trigger
+    language plpgsql as $$ begin raise exception 'simulated queue outage'; end $$;
+    create trigger test_background_job_outage
+      before insert or update on background_jobs
+      for each row execute function test_fail_background_job_insert()
+  `);
+  const retried = await call(`/api/admin/orders/${order.id}/approve`, { as: ADMIN, method: 'POST' });
+  check('a post-commit queue outage does not report approval as failed', retried.status === 200,
+    JSON.stringify(retried.body).slice(0, 160));
+  await query(`
+    drop trigger test_background_job_outage on background_jobs;
+    drop function test_fail_background_job_insert()
+  `);
 }
 
 console.log('\n- a stock take writes the ledger and the mirror -');
