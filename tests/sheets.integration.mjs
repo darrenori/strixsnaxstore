@@ -422,6 +422,13 @@ console.log('\n- approving refreshes the same row again -');
 {
   const milk = rows('Items & Stock').find((r) => r?.[0] === 'HP-MILK');
   milk[8] = '999';
+  // Simulate a serverless worker that was interrupted after the database was
+  // stamped but before the committee could see the ledger row.
+  const ledger = rows('Stock Movements');
+  const lostMovement = ledger.findIndex((r) => r?.[6] === order.code);
+  ledger.splice(lostMovement, 1);
+  check('the simulated interrupted sync removed the movement row',
+    rows('Stock Movements').filter((r) => r?.[6] === order.code).length === 0);
   catalogWriteDelayMs = 200;
   const approved = await call(`/api/admin/orders/${order.id}/approve`, { as: ADMIN, method: 'POST' });
   check('approval succeeds', approved.status === 200, JSON.stringify(approved.body).slice(0, 120));
@@ -436,7 +443,8 @@ console.log('\n- approving refreshes the same row again -');
   const payments = rows('Payments').filter((r) => r?.[0] === order.code);
   check('the payment row is refreshed, not duplicated', payments.length === 1, `got ${payments.length}`);
   check('and reads paid', payments[0]?.[5] === 'paid', payments[0]?.[5]);
-  check('no stock moved twice', rows('Stock Movements').filter((r) => r?.[6] === order.code).length === 1);
+  check('the missing stock movement is reconciled without duplication',
+    rows('Stock Movements').filter((r) => r?.[6] === order.code).length === 1);
   const { one } = await import('../src/lib/db.js');
   check('approval leaves no due stock-sync jobs',
     Number((await one('select count(*) as n from background_jobs where run_after <= now()')).n) === 0);
@@ -459,6 +467,15 @@ console.log('\n- approving refreshes the same row again -');
     drop trigger test_background_job_outage on background_jobs;
     drop function test_fail_background_job_insert()
   `);
+
+  // A full admin push also repairs movements belonging to orders that were
+  // already paid before this deployment.
+  const repairedLedger = rows('Stock Movements');
+  repairedLedger.splice(repairedLedger.findIndex((r) => r?.[6] === order.code), 1);
+  const pushed = await call('/api/admin/sheets/sync', { as: ADMIN, method: 'POST' });
+  check('the full sheet push succeeds', pushed.status === 200, JSON.stringify(pushed.body).slice(0, 160));
+  check('the full sheet push restores a paid order movement',
+    rows('Stock Movements').filter((r) => r?.[6] === order.code).length === 1);
 }
 
 console.log('\n- a stock take writes the ledger and the mirror -');

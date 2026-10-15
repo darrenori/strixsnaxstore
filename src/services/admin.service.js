@@ -1,7 +1,7 @@
 import { query, one, rpc, parseDbError } from '../lib/db.js';
 import * as sheets from '../lib/sheets.js';
 import {
-  syncCatalogToSheets, syncCatalogItemsToSheets, queueStockFollowUp,
+  syncAllStockMovements, syncCatalogToSheets, syncCatalogItemsToSheets, queueStockFollowUp,
 } from './collation.service.js';
 import { getCatalogForSheets } from './catalog.service.js';
 import log from '../lib/logger.js';
@@ -412,10 +412,15 @@ export async function importCatalogFromSheets({ admin }) {
 // Re-exported so the routes keep one import for "the admin can do this".
 // The implementation lives with the rest of the collation, next to the order
 // sync and the low-stock alert it has to stay consistent with.
-export { syncCatalogToSheets };
+/** Push both the live catalogue and the authoritative stock ledger to Sheets. */
+export async function syncAllToSheets() {
+  const catalog = await syncCatalogToSheets();
+  const stockMovements = await syncAllStockMovements();
+  return { ok: catalog && stockMovements >= 0, catalog, stockMovements };
+}
 
 export default {
   setStock, adjustStock, bulkSetStock, listStockMovements,
   createItem, updateItem, archiveItem, createCategory,
-  listUsers, setAdmin, setBlocked, syncCatalogToSheets, importCatalogFromSheets, AdminError,
+  listUsers, setAdmin, setBlocked, syncAllToSheets, importCatalogFromSheets, AdminError,
 };

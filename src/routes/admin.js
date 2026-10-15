@@ -313,14 +313,20 @@ router.post('/admin/settings', async (req, res, next) => {
   } catch (err) { return next(err); }
 });
 
-/** Force a full catalogue push into the spreadsheet. */
+/** Reconcile the full catalogue and stock ledger into the spreadsheet. */
 router.post('/admin/sheets/sync', async (req, res, next) => {
   try {
     if (!sheetsEnabled()) {
       return res.status(400).json({ error: 'Google Sheets is not configured on the server.' });
     }
-    const ok = await admin.syncCatalogToSheets();
-    return res.json({ ok });
+    const result = await admin.syncAllToSheets();
+    if (!result.ok) {
+      return res.status(502).json({
+        ...result,
+        error: 'Google Sheets accepted only part of the sync. Please try again.',
+      });
+    }
+    return res.json(result);
   } catch (err) { return next(err); }
 });
 

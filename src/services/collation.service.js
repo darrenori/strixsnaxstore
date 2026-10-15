@@ -288,6 +288,16 @@ export async function syncStockLedger({ limit = 200 } = {}) {
     return pending?.yes ? -1 : 0;
   }
 
+  return writeStockMovementRows(rows);
+}
+
+/**
+ * Hydrate ledger rows with their human-readable names, write any Movement IDs
+ * missing from the sheet, then stamp the database rows as copied.
+ */
+async function writeStockMovementRows(rows) {
+  if (rows.length === 0) return 0;
+
   // Names for the ids, in one round trip rather than one per row.
   const [items, orders, actors] = await Promise.all([
     query('select id, sku, name, variant from items where id = any($1::uuid[])',
@@ -335,6 +345,39 @@ export async function syncStockLedger({ limit = 200 } = {}) {
     [rows.map((r) => r.id)]
   );
   return rows.length;
+}
+
+/**
+ * Reconcile every stock movement belonging to one order.
+ *
+ * Approval uses this targeted pass because the order row and its line items
+ * can sync successfully even when an earlier serverless invocation was frozen
+ * halfway through the separate stock-ledger job. recordStockMovement checks
+ * Movement ID before appending, so retrying an approval remains idempotent.
+ */
+export async function syncOrderStockMovements(orderId) {
+  if (!sheets.sheetsEnabled()) return 0;
+  const rows = await query(
+    `select id, delta, balance_after, reason, note, created_at,
+            item_id, order_id, actor_id
+       from stock_movements
+      where order_id = $1
+      order by created_at`,
+    [orderId]
+  );
+  return writeStockMovementRows(rows);
+}
+
+/** Reconcile the complete PostgreSQL ledger against Movement IDs in Sheets. */
+export async function syncAllStockMovements() {
+  if (!sheets.sheetsEnabled()) return 0;
+  const rows = await query(
+    `select id, delta, balance_after, reason, note, created_at,
+            item_id, order_id, actor_id
+       from stock_movements
+      order by created_at`
+  );
+  return writeStockMovementRows(rows);
 }
 
 /** Push the whole catalogue into the "Items & Stock" tab. */
@@ -452,6 +495,7 @@ export async function queueStockFollowUp(skus = [], { waitForAttempt = false } =
 
 export default {
   queue, syncOrderToSheets, queueOrderSync, syncStockLedger,
+  syncOrderStockMovements, syncAllStockMovements,
   syncCatalogToSheets, syncCatalogItemsToSheets, checkLowStock,
   queueStockFollowUp, drainBackgroundJobs, kickJobRunner,
 };

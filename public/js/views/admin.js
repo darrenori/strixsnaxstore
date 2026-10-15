@@ -631,7 +631,7 @@ function renderSettings(root, summary) {
 
   // Two directions, named so it is obvious which way the data moves - a push
   // overwrites whatever was typed in the sheet, so mixing them up loses work.
-  const syncBtn = el('button', { class: 'btn btn--navy', type: 'button' }, '↑ PUSH MENU TO SHEET');
+  const syncBtn = el('button', { class: 'btn btn--navy', type: 'button' }, '↑ PUSH ALL TO SHEET');
   syncBtn.addEventListener('click', () => withBusy(syncBtn, 'PUSHING', async () => {
     try {
       await api.syncSheets();
@@ -688,7 +688,8 @@ function renderSettings(root, summary) {
         summary.integrations.sheets
           ? 'Connected. Approved orders are appended automatically. Edit prices, '
             + 'names or stock in Items & Stock, then press SYNC FROM SHEET to apply '
-            + 'them here. Pushing overwrites the sheet, so sync first.'
+            + 'them here. Pushing reconciles the menu and stock ledger, and overwrites '
+            + 'editable menu cells, so sync from the sheet first.'
           : 'Not configured - set the Google service-account variables on the server.'),
       summary.integrations.sheetUrl
         ? el('p', {}, el('a', { href: summary.integrations.sheetUrl, target: '_blank', rel: 'noopener' },

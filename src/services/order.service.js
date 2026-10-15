@@ -1,6 +1,8 @@
 import { query, one, rpc, transaction, parseDbError } from '../lib/db.js';
 import { createPaymentQr } from '../lib/paynow.js';
-import { queueOrderSync, queueStockFollowUp, syncOrderToSheets } from './collation.service.js';
+import {
+  queueOrderSync, queueStockFollowUp, syncOrderStockMovements, syncOrderToSheets,
+} from './collation.service.js';
 import config from '../config.js';
 import log from '../lib/logger.js';
 
@@ -374,6 +376,13 @@ export async function approveOrder({ orderId, admin, note }) {
 
   // Approving an order that never had a screenshot settles its stock here.
   const items = await loadItems(order.id);
+  await syncOrderStockMovements(order.id).catch((err) => {
+    // The durable general ledger job below remains the fallback. Payment
+    // approval is already committed and must still be reported as successful.
+    log.error('Order stock movement reconciliation failed', {
+      code: order.code, error: err.message,
+    });
+  });
   await queueStockFollowUp(items.map((item) => item.sku), { waitForAttempt: true })
     .catch((err) => {
       // Stock was settled by approve_order (or earlier when the proof arrived).
