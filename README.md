@@ -60,11 +60,12 @@ screenshot, and every confirmed sale written into Google Sheets.
 - When a line falls to its last couple of units, every admin gets a Telegram
   message. Once per crossing, not once per sale: restocking re-arms it.
 - The sheet edits back. Change a price, name, stock count or the Active flag
-  in *Items & Stock*, press **SYNC FROM SHEET** in the admin tab, and it lands
-  in the catalogue - stock through the ledger, like any stock-take. Rows are
-  matched on SKU; an unknown SKU or an unreadable cell is reported rather than
-  guessed at, and never inserted or deleted. **PUSH MENU TO SHEET** goes the
-  other way and overwrites the sheet, so sync before you push.
+  in *Items & Stock*, then open (or switch back to) the app as an admin, and it
+  lands in the catalogue - stock through the ledger, like any stock-take. The
+  same sync then writes the shop's state back out, so there are no buttons to
+  press. Rows are matched on SKU; an unknown SKU or an unreadable cell is
+  reported rather than guessed at, and never inserted or deleted. A line the
+  shop changed more recently than the sheet keeps the shop's value.
 
 ---
 
@@ -235,6 +236,11 @@ TELEGRAM_WEBHOOK_URL=https://<your-app>.vercel.app/telegram/webhook
 TELEGRAM_WEBHOOK_SECRET=<a long random string>
 CRON_SECRET=<another long random string>
 ```
+
+`vercel.json` pins the function to `sin1` (Singapore), next to a Supabase
+project in `ap-southeast-1`. Every request makes several database round trips,
+so a function in Vercel's default US region adds a trans-Pacific hop to each
+one. If your database lives elsewhere, change `regions` to match it.
 
 **Avoid free tiers that sleep.** A sleeping instance stops long polling, and
 the store advertises itself as open 24/7. Serverless does not have this

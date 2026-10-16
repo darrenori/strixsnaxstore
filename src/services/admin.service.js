@@ -1,7 +1,9 @@
 import { query, one, rpc, parseDbError } from '../lib/db.js';
 import * as sheets from '../lib/sheets.js';
+import { afterResponse } from '../lib/background.js';
 import {
   syncAllStockMovements, syncCatalogToSheets, syncCatalogItemsToSheets, queueStockFollowUp,
+  kickJobRunner,
 } from './collation.service.js';
 import { getCatalogForSheets } from './catalog.service.js';
 import log from '../lib/logger.js';
@@ -306,6 +308,11 @@ export async function importCatalogFromSheets({ admin }) {
     throw new AdminError('Google Sheets is not configured.', 'SHEETS_DISABLED', 400);
   }
 
+  // Let anything the shop has already queued for the sheet land first. A
+  // sale that moved stock but has not reached the sheet yet would otherwise
+  // read as somebody typing the old count back in.
+  await kickJobRunner();
+
   let rows;
   try {
     rows = await sheets.readCatalogTab();
@@ -314,7 +321,10 @@ export async function importCatalogFromSheets({ admin }) {
   }
   if (!rows) throw new AdminError('Google Sheets is not configured.', 'SHEETS_DISABLED', 400);
 
-  const current = await getCatalogForSheets();
+  const [current, stale] = await Promise.all([
+    getCatalogForSheets(),
+    pendingCatalogSyncs(),
+  ]);
   const bySku = new Map(current.map((i) => [i.sku, i]));
 
   const changed = [];
@@ -331,6 +341,12 @@ export async function importCatalogFromSheets({ admin }) {
     const item = bySku.get(row.sku);
     if (!item) {
       skipped.push({ sku: row.sku, row: row.row, reason: 'no item with that SKU' });
+      continue;
+    }
+    // The shop changed this line after the sheet was last written, so the
+    // row is older than the database. It is restated below, not imported.
+    if (stale.has(row.sku)) {
+      unchanged += 1;
       continue;
     }
 
@@ -384,10 +400,10 @@ export async function importCatalogFromSheets({ admin }) {
     if (!fields.length && (row.stock === null || row.stock === item.stock)) unchanged += 1;
   }
 
-  // Restate every known row read from the sheet, including malformed rows we
-  // refused to import. This preserves that correction behavior without
-  // clearing and rewriting unrelated rows.
-  const knownSkus = rows.map((row) => row.sku).filter((sku) => bySku.has(sku));
+  // Restate every item, including malformed rows we refused to import and
+  // items missing from the sheet altogether (those are appended). This is
+  // what the old "push menu" button did, without clearing the whole tab.
+  const knownSkus = current.map((item) => item.sku);
   const mirrored = await syncCatalogItemsToSheets(knownSkus);
   // The ledger rows and the low-stock check ride along, so a restock typed
   // into the spreadsheet is indistinguishable from one typed into the panel.
@@ -412,15 +428,54 @@ export async function importCatalogFromSheets({ admin }) {
 // Re-exported so the routes keep one import for "the admin can do this".
 // The implementation lives with the rest of the collation, next to the order
 // sync and the low-stock alert it has to stay consistent with.
-/** Push both the live catalogue and the authoritative stock ledger to Sheets. */
-export async function syncAllToSheets() {
-  const catalog = await syncCatalogToSheets();
-  const stockMovements = await syncAllStockMovements();
-  return { ok: catalog && stockMovements >= 0, catalog, stockMovements };
+/** SKUs with a catalogue write to the sheet still queued or running. */
+async function pendingCatalogSyncs() {
+  try {
+    const rows = await query(
+      "select entity_key from background_jobs where kind = 'catalog_sheet_sync'"
+    );
+    return new Set(rows.map((r) => r.entity_key));
+  } catch {
+    return new Set();             // queue table not there yet
+  }
 }
+
+/** Shortest gap between two automatic syncs, across every server instance. */
+const AUTO_SYNC_GAP_SECONDS = 10;
+
+/**
+ * Two-way sync, run whenever an admin opens the app.
+ *
+ * Replaces the PUSH and SYNC buttons: the sheet's edits come in and the shop's
+ * state goes back out in one step, so there is no order to get wrong. The
+ * slot is claimed in Postgres so several admins opening the app at once, on
+ * different serverless instances, run it once rather than racing each other.
+ */
+export async function autoSyncSheets({ admin }) {
+  if (!sheets.sheetsEnabled()) return { skipped: 'disabled' };
+
+  const claimed = await one(
+    `insert into settings(key, value, updated_at)
+     values ('sheets_auto_synced_at', to_jsonb(now()), now())
+     on conflict (key) do update set value = excluded.value, updated_at = now()
+       where settings.updated_at < now() - ($1 * interval '1 second')
+     returning key`,
+    [AUTO_SYNC_GAP_SECONDS]
+  );
+  if (!claimed) return { skipped: 'recent' };
+
+  const result = await importCatalogFromSheets({ admin });
+  // Fill any gaps in the Stock Movements tab from the full ledger, as the old
+  // push button did. Nobody is waiting on it, so it runs after the reply.
+  afterResponse('Stock ledger reconciliation', () => syncAllStockMovements());
+  return result;
+}
+
+export { syncCatalogToSheets };
 
 export default {
   setStock, adjustStock, bulkSetStock, listStockMovements,
   createItem, updateItem, archiveItem, createCategory,
-  listUsers, setAdmin, setBlocked, syncAllToSheets, importCatalogFromSheets, AdminError,
+  listUsers, setAdmin, setBlocked, syncCatalogToSheets, importCatalogFromSheets, autoSyncSheets,
+  AdminError,
 };

@@ -1,8 +1,9 @@
 import { query, one, rpc, transaction, parseDbError } from '../lib/db.js';
 import { createPaymentQr } from '../lib/paynow.js';
 import {
-  queueOrderSync, queueStockFollowUp, syncOrderStockMovements, syncOrderToSheets,
+  queueOrderSync, queueStockFollowUp, syncOrderStockMovements,
 } from './collation.service.js';
+import { afterResponse } from '../lib/background.js';
 import config from '../config.js';
 import log from '../lib/logger.js';
 
@@ -84,17 +85,19 @@ export async function placeOrder({ user, buyerName, note, cart }) {
     throw new OrderError('Could not place that order. Please try again.', 'ORDER_FAILED', 500);
   }
 
-  // Remember the name so the next checkout is one tap shorter.
-  if (buyerName && buyerName !== user.display_name) {
-    await query('update app_users set display_name = $1 where id = $2', [buyerName, user.id]);
-  }
-
-  const items = await loadItems(order.id);
-  const qr = await createPaymentQr({
-    amountCents: order.total_cents,
-    reference: order.code,
-    expiresAt: new Date(order.expires_at),
-  });
+  // Independent of each other, so one round trip rather than three in a row.
+  const [items, qr] = await Promise.all([
+    loadItems(order.id),
+    createPaymentQr({
+      amountCents: order.total_cents,
+      reference: order.code,
+      expiresAt: new Date(order.expires_at),
+    }),
+    // Remember the name so the next checkout is one tap shorter.
+    buyerName && buyerName !== user.display_name
+      ? query('update app_users set display_name = $1 where id = $2', [buyerName, user.id])
+      : null,
+  ]);
 
   log.info('Order placed', { code: order.code, total: order.total_cents, user: user.telegram_id });
 
@@ -356,42 +359,27 @@ export async function approveOrder({ orderId, admin, note }) {
 
   log.info('Order approved', { code: order.code, admin: admin.telegram_id });
 
-  // Awaited, not queued: an admin who has just pressed Approve is entitled to
-  // find that row in the spreadsheet a moment later, and this is the one place
-  // where somebody is actually watching for it.
-  const synced = await syncOrderToSheets(orderId).catch((err) => {
-    log.error('Order sheet sync failed', { code: order.code, error: err.message });
-    return false;
-  });
-  if (!synced) {
-    await queueOrderSync(orderId).catch((err) => {
-      // The payment decision is already committed in Postgres. A temporary
-      // queue or Sheets failure must not tell the admin that approval failed
-      // and tempt them to press the button again.
-      log.error('Order sheet retry could not be queued', {
-        code: order.code, error: err.message,
-      });
-    });
-  }
-
+  // Queued, not awaited. Writing the row takes several round trips to Google,
+  // and waiting on them is what made Approve feel stuck (and, behind a hung
+  // call, fail outright). The runner is kept alive past the response, so the
+  // row still lands within a few seconds.
   // Approving an order that never had a screenshot settles its stock here.
   const items = await loadItems(order.id);
-  await syncOrderStockMovements(order.id).catch((err) => {
-    // The durable general ledger job below remains the fallback. Payment
-    // approval is already committed and must still be reported as successful.
-    log.error('Order stock movement reconciliation failed', {
+  await Promise.all([
+    queueOrderSync(orderId),
+    queueStockFollowUp(items.map((item) => item.sku)),
+  ]).catch((err) => {
+    // The payment decision is already committed in Postgres. A temporary
+    // queue failure must not tell the admin that approval failed and tempt
+    // them to press the button again; the janitor picks the sync up later.
+    log.error('Approval sheet follow-up could not be queued', {
       code: order.code, error: err.message,
     });
   });
-  await queueStockFollowUp(items.map((item) => item.sku), { waitForAttempt: true })
-    .catch((err) => {
-      // Stock was settled by approve_order (or earlier when the proof arrived).
-      // Keep the successful decision visible even if its spreadsheet mirror
-      // needs a later retry.
-      log.error('Approval stock follow-up failed', {
-        code: order.code, error: err.message,
-      });
-    });
+  // An earlier invocation may have been cut off halfway through the ledger
+  // job, so reconcile this order's movements too. Movement IDs make it safe
+  // to repeat.
+  afterResponse('Order stock movement reconciliation', () => syncOrderStockMovements(order.id));
 
   return toPublicOrder(order, items);
 }
@@ -409,13 +397,16 @@ export async function rejectOrder({ orderId, admin, note, status = 'rejected' })
   }
   log.info('Order rejected', { code: order.code, admin: admin.telegram_id, status });
 
-  const synced = await syncOrderToSheets(orderId).catch((err) => {
-    log.error('Order sheet sync failed', { code: order.code, error: err.message });
-    return false;
-  });
-  if (!synced) await queueOrderSync(orderId);
   const items = await loadItems(order.id);
-  await queueStockFollowUp(items.map((item) => item.sku));
+  await Promise.all([
+    queueOrderSync(orderId),
+    queueStockFollowUp(items.map((item) => item.sku)),
+  ]).catch((err) => {
+    // Committed already; see approveOrder.
+    log.error('Rejection sheet follow-up could not be queued', {
+      code: order.code, error: err.message,
+    });
+  });
 
   return toPublicOrder(order, items);
 }

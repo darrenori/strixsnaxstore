@@ -433,13 +433,16 @@ console.log('\n- approving refreshes the same row again -');
   const approved = await call(`/api/admin/orders/${order.id}/approve`, { as: ADMIN, method: 'POST' });
   check('approval succeeds', approved.status === 200, JSON.stringify(approved.body).slice(0, 120));
 
+  // Approval answers before Google does, so the admin is not left waiting on
+  // several sheet round trips; the rows land moments later.
+  await settle();
   const matching = rows('Orders').filter((r) => r?.[0] === order.code);
   check('still one row, not two', matching.length === 1, `got ${matching.length}`);
   check('marked paid', matching[0]?.[2] === 'paid', matching[0]?.[2]);
   check('naming who verified it', matching[0]?.[13] === 'Boss', matching[0]?.[13]);
   check('and when', /\d{4}-\d{2}-\d{2} /.test(matching[0]?.[14] ?? ''), matching[0]?.[14]);
-  check('the stock row is current before approval returns', milk?.[8] === '22', milk?.[8]);
-  await settle();
+  const milkNow = rows('Items & Stock').find((r) => r?.[0] === 'HP-MILK');
+  check('the stock row is put right straight after approval', milkNow?.[8] === '22', milkNow?.[8]);
   const payments = rows('Payments').filter((r) => r?.[0] === order.code);
   check('the payment row is refreshed, not duplicated', payments.length === 1, `got ${payments.length}`);
   check('and reads paid', payments[0]?.[5] === 'paid', payments[0]?.[5]);
@@ -474,6 +477,7 @@ console.log('\n- approving refreshes the same row again -');
   repairedLedger.splice(repairedLedger.findIndex((r) => r?.[6] === order.code), 1);
   const pushed = await call('/api/admin/sheets/sync', { as: ADMIN, method: 'POST' });
   check('the full sheet push succeeds', pushed.status === 200, JSON.stringify(pushed.body).slice(0, 160));
+  await settle();
   check('the full sheet push restores a paid order movement',
     rows('Stock Movements').filter((r) => r?.[6] === order.code).length === 1);
 }
@@ -537,6 +541,37 @@ console.log('\n- the sheet edits back -');
   const chocolate = rows('Items & Stock').find((r) => r?.[0] === 'HP-CHOCOLATE');
   check('and the skipped row was restated from the database, not left as typed',
     chocolate?.[7] === '1.20', chocolate?.[7]);
+}
+
+console.log('\n- opening the app syncs both ways, with no button -');
+{
+  await settle();
+  // Somebody deletes a line from the tab and fixes a price on another.
+  const tab = tabs.get('Items & Stock');
+  const gone = tab.rows.findIndex((r) => r?.[0] === 'HP-CHOCOLATE');
+  tab.rows.splice(gone, 1);
+  const milkIndex = tab.rows.findIndex((r) => r?.[0] === 'HP-MILK');
+  tab.rows[milkIndex][7] = '1.60';
+
+  // An earlier section already synced; let this open count as a fresh one.
+  const { query: sql } = await import('../src/lib/db.js');
+  await sql("delete from settings where key = 'sheets_auto_synced_at'");
+
+  const res = await call('/api/admin/sheets/sync', { as: ADMIN, method: 'POST' });
+  check('the automatic sync runs', res.status === 200, JSON.stringify(res.body).slice(0, 160));
+  check('it brings the sheet edit in', res.body?.updated >= 1, JSON.stringify(res.body?.changes));
+
+  const cat = await call('/api/catalog');
+  const milk = cat.body.categories.flatMap((c) => c.items).find((i) => i.sku === 'HP-MILK');
+  check('the shop shows the price typed in the sheet', milk?.price === '1.60', milk?.price);
+
+  await settle();
+  check('and puts the deleted line back',
+    rows('Items & Stock').some((r) => r?.[0] === 'HP-CHOCOLATE'));
+
+  const again = await call('/api/admin/sheets/sync', { as: ADMIN, method: 'POST' });
+  check('a second open straight after is skipped, not rerun',
+    again.body?.skipped === 'recent', JSON.stringify(again.body));
 }
 
 console.log('\n- a buyer whose name is a formula -');

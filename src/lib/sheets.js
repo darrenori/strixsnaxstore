@@ -76,6 +76,28 @@ export function sheetsEnabled() {
   return credentialsPresent();
 }
 
+/**
+ * Every call gets a deadline and a couple of retries.
+ *
+ * Calls are serialised (below), so one request that never answers holds up
+ * every sheet write behind it, and with no timeout the client waits forever.
+ * On a serverless host that ends with the invocation killed at its limit and
+ * the admin who pressed Approve looking at an error. Rate limits (429) and
+ * Google's own 5xx are retried with backoff, since both usually clear in a
+ * second or two.
+ */
+const REQUEST_OPTIONS = {
+  timeout: 15_000,
+  retryConfig: {
+    retry: 2,
+    // A timed-out append may still have landed, and retrying it would write
+    // the order twice. Only retry what Google explicitly refused.
+    noResponseRetries: 0,
+    httpMethodsToRetry: ['GET', 'PUT', 'POST', 'DELETE'],
+    statusCodesToRetry: [[429, 429], [500, 599]],
+  },
+};
+
 async function client() {
   if (sheetsClient) return sheetsClient;
   if (!credentialsPresent()) return null;
@@ -87,6 +109,7 @@ async function client() {
       version: 'v4',
       auth: config.sheets.privateKey,
       rootUrl: config.sheets.apiRoot,
+      ...REQUEST_OPTIONS,
     });
     return sheetsClient;
   }
@@ -97,7 +120,7 @@ async function client() {
     scopes: SCOPES,
   });
   await auth.authorize();
-  sheetsClient = sheetsApi({ version: 'v4', auth });
+  sheetsClient = sheetsApi({ version: 'v4', auth, ...REQUEST_OPTIONS });
   return sheetsClient;
 }
 

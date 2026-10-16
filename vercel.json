@@ -3,6 +3,7 @@
   "framework": null,
   "buildCommand": "node scripts/stamp-assets.js",
   "outputDirectory": "public",
+  "regions": ["sin1"],
   "functions": {
     "api/index.js": {
       "maxDuration": 30,

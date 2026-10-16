@@ -3,7 +3,7 @@ import {
   setAdminBadge,
 } from '../ui.js';
 import { state, emit, invalidateAdminSummary, refreshCatalog } from '../store.js';
-import { haptic, confirm, alert } from '../tg.js';
+import { haptic, confirm } from '../tg.js';
 import api from '../api.js';
 
 /**
@@ -124,7 +124,10 @@ function orderReviewCard(order, refresh) {
           toast(`${order.code} approved`, 'ok');
           // The queue depth and the revenue tile have both just moved.
           invalidateAdminSummary();
-          refresh();
+          // Gone from the screen at once; the list catches up behind it
+          // without flashing back to placeholders.
+          card.remove();
+          refresh({ quiet: true });
         } catch (err) { haptic('error'); toast(err.message, 'error'); }
       });
     });
@@ -145,7 +148,8 @@ function orderReviewCard(order, refresh) {
           haptic('warning');
           toast(`${order.code} rejected`);
           invalidateAdminSummary();
-          refresh();
+          card.remove();
+          refresh({ quiet: true });
         } catch (err) { haptic('error'); toast(err.message, 'error'); }
       });
     });
@@ -168,8 +172,8 @@ function renderQueue(root) {
   const bar = el('div', { class: 'admin-nav' });
   const list = el('div', {}, skeletons(3));
 
-  const load = async () => {
-    list.replaceChildren(skeletons(2));
+  const load = async ({ quiet = false } = {}) => {
+    if (!quiet) list.replaceChildren(skeletons(2));
     try {
       const { orders } = await api.adminOrders(active || undefined);
       list.replaceChildren();
@@ -629,45 +633,6 @@ function renderSettings(root, summary) {
     } catch (err) { haptic('error'); toast(err.message, 'error'); }
   }));
 
-  // Two directions, named so it is obvious which way the data moves - a push
-  // overwrites whatever was typed in the sheet, so mixing them up loses work.
-  const syncBtn = el('button', { class: 'btn btn--navy', type: 'button' }, '↑ PUSH ALL TO SHEET');
-  syncBtn.addEventListener('click', () => withBusy(syncBtn, 'PUSHING', async () => {
-    try {
-      await api.syncSheets();
-      haptic('success');
-      toast('Google Sheet updated', 'ok');
-    } catch (err) { haptic('error'); toast(err.message, 'error'); }
-  }));
-
-  const importBtn = el('button', { class: 'btn btn--blue', type: 'button' }, '↓ SYNC FROM SHEET');
-  importBtn.addEventListener('click', () => withBusy(importBtn, 'READING', async () => {
-    try {
-      const r = await api.importSheets();
-      haptic(r.skipped.length ? 'warning' : 'success');
-
-      const parts = [];
-      if (r.updated) parts.push(`${r.updated} item(s) updated`);
-      if (r.stockChanged) parts.push(`${r.stockChanged} stock change(s)`);
-      if (!parts.length) parts.push('nothing to change');
-      toast(parts.join(' · '), r.skipped.length ? 'warn' : 'ok');
-
-      // A skipped row is the interesting case - say which and why, because
-      // the sheet will look untouched and that is easy to misread as a bug.
-      if (r.skipped.length) {
-        await alert(
-          `${r.skipped.length} row(s) were left alone:\n\n` +
-          r.skipped.map((s) => `Row ${s.row} (${s.sku}): ${s.reason}`).join('\n')
-        );
-      }
-      // The shop is rendering from a catalogue these edits have just made
-      // stale, so pull it again before letting the view redraw.
-      await refreshCatalog();
-      invalidateAdminSummary();
-      emit();
-    } catch (err) { haptic('error'); toast(err.message, 'error'); }
-  }));
-
   root.append(
     el('section', { class: 'card' },
       el('h2', { class: 'card__title' }, '⚙️ Store'),
@@ -686,17 +651,13 @@ function renderSettings(root, summary) {
       el('h2', { class: 'card__title' }, '📊 Google Sheets'),
       el('p', { class: 'muted' },
         summary.integrations.sheets
-          ? 'Connected. Approved orders are appended automatically. Edit prices, '
-            + 'names or stock in Items & Stock, then press SYNC FROM SHEET to apply '
-            + 'them here. Pushing reconciles the menu and stock ledger, and overwrites '
-            + 'editable menu cells, so sync from the sheet first.'
+          ? 'Connected. Orders and stock are written to the sheet as they happen. '
+            + 'Edit prices, names or stock in Items & Stock and they are applied '
+            + 'the next time you open the app.'
           : 'Not configured - set the Google service-account variables on the server.'),
       summary.integrations.sheetUrl
         ? el('p', {}, el('a', { href: summary.integrations.sheetUrl, target: '_blank', rel: 'noopener' },
             'Open the spreadsheet ↗'))
-        : null,
-      summary.integrations.sheets
-        ? el('div', { class: 'sheet-actions' }, importBtn, syncBtn)
         : null
     ),
     el('section', { class: 'card card--flat' },

@@ -5,8 +5,8 @@ import * as admin from '../services/admin.service.js';
 import * as catalog from '../services/catalog.service.js';
 import { notifyBuyerOfDecision } from '../bot/notify.js';
 import { sheetsEnabled } from '../lib/sheets.js';
+import { afterResponse } from '../lib/background.js';
 import config from '../config.js';
-import log from '../lib/logger.js';
 
 const router = Router();
 
@@ -96,7 +96,7 @@ router.post('/admin/orders/:id/approve', async (req, res, next) => {
       admin: req.user,
       note: parsed.success ? parsed.data.note || null : null,
     });
-    notifyBuyerOfDecision(order, 'approved').catch((e) => log.error('Notify failed', { error: e.message }));
+    afterResponse('Notify buyer', () => notifyBuyerOfDecision(order, 'approved'));
     return res.json({ order });
   } catch (err) { return next(err); }
 });
@@ -109,7 +109,7 @@ router.post('/admin/orders/:id/reject', async (req, res, next) => {
       admin: req.user,
       note: parsed.success ? parsed.data.note || null : null,
     });
-    notifyBuyerOfDecision(order, 'rejected').catch((e) => log.error('Notify failed', { error: e.message }));
+    afterResponse('Notify buyer', () => notifyBuyerOfDecision(order, 'rejected'));
     return res.json({ order });
   } catch (err) { return next(err); }
 });
@@ -313,20 +313,14 @@ router.post('/admin/settings', async (req, res, next) => {
   } catch (err) { return next(err); }
 });
 
-/** Reconcile the full catalogue and stock ledger into the spreadsheet. */
+/**
+ * Two-way sync, called by the app whenever an admin opens it: edits typed in
+ * the sheet come in, then the shop's state goes back out. Rate-limited on the
+ * server, so a burst of reopenings costs one sync.
+ */
 router.post('/admin/sheets/sync', async (req, res, next) => {
   try {
-    if (!sheetsEnabled()) {
-      return res.status(400).json({ error: 'Google Sheets is not configured on the server.' });
-    }
-    const result = await admin.syncAllToSheets();
-    if (!result.ok) {
-      return res.status(502).json({
-        ...result,
-        error: 'Google Sheets accepted only part of the sync. Please try again.',
-      });
-    }
-    return res.json(result);
+    return res.json(await admin.autoSyncSheets({ admin: req.user }));
   } catch (err) { return next(err); }
 });
 

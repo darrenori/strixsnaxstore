@@ -2,6 +2,7 @@ import { query, one } from '../lib/db.js';
 import * as sheets from '../lib/sheets.js';
 import { notifyAdminsOfLowStock } from '../bot/notify.js';
 import { getCatalogForSheets } from './catalog.service.js';
+import { afterResponse } from '../lib/background.js';
 import config from '../config.js';
 import log from '../lib/logger.js';
 
@@ -27,10 +28,7 @@ import log from '../lib/logger.js';
  * Google returned a 503 would be a poor trade.
  */
 export function queue(label, task) {
-  const work = Promise.resolve()
-    .then(task)
-    .catch((err) => log.error(`${label} failed`, { error: err.message }));
-  return work;
+  return afterResponse(label, task);
 }
 
 // ---------------------------------------------------------------------------
@@ -42,8 +40,12 @@ let runnerRequested = false;
 
 async function enqueueJobs(entries) {
   if (entries.length === 0) return true;
+  // Rows are locked in the order they are listed. Two requests listing the
+  // same SKUs in different orders would deadlock each other, so sort first.
+  const sorted = [...entries].sort((a, b) =>
+    `${a.kind}\u0000${a.key}`.localeCompare(`${b.kind}\u0000${b.key}`));
   const params = [];
-  const values = entries.map((entry) => {
+  const values = sorted.map((entry) => {
     const start = params.length;
     params.push(entry.kind, entry.key, JSON.stringify(entry.payload ?? {}));
     return `($${start + 1}, $${start + 2}, $${start + 3}::jsonb)`;
@@ -158,16 +160,17 @@ export function kickJobRunner() {
     runnerRequested = true;
     return activeRunner;
   }
-  activeRunner = (async () => {
+  // Kept alive past the response, so a serverless invocation finishes the
+  // sheet write instead of freezing in the middle of it.
+  // A request that arrived mid-drain is picked up inside the same kept-alive
+  // promise, not by a second one started after the host may have frozen.
+  activeRunner = afterResponse('Background job runner', async () => {
     do {
       runnerRequested = false;
+      // eslint-disable-next-line no-await-in-loop
       await drainBackgroundJobs();
     } while (runnerRequested);
-  })()
-    .catch((err) => log.error('Background job runner failed', { error: err.message }))
-    .finally(() => {
-      activeRunner = null;
-    });
+  }).finally(() => { activeRunner = null; });
   return activeRunner;
 }
 

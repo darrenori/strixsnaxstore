@@ -1,5 +1,6 @@
 import * as orders from '../services/order.service.js';
 import { sniffImage } from '../lib/image.js';
+import { afterResponse } from '../lib/background.js';
 import { notifyAdminsOfOrder, esc } from './notify.js';
 import log from '../lib/logger.js';
 
@@ -118,8 +119,7 @@ async function attach(ctx, order, file) {
     );
   }
 
-  notifyAdminsOfOrder(updated, user).catch((err) =>
-    log.error('Admin notify failed', { error: err.message }));
+  afterResponse('Admin notify', () => notifyAdminsOfOrder(updated, user));
 
   const where = (updated.collectionPoints ?? []).join(' + ') || 'Blk B';
   return ctx.replyWithHTML(

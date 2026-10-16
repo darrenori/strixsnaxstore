@@ -982,7 +982,6 @@ img { max-width: 100%; display: block; }
 }
 .admin-nav__btn.is-active { background: var(--navy); color: var(--cream); }
 
-.sheet-actions { display: grid; gap: 8px; }
 .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 16px; }
 .stat {
   background: var(--surface);

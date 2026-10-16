@@ -84,8 +84,8 @@ export const api = {
   setRole:       (telegramId, isAdmin) => request('/admin/users/role', { method: 'POST', body: { telegramId, isAdmin } }),
   setBlocked:    (telegramId, isBlocked) => request('/admin/users/block', { method: 'POST', body: { telegramId, isBlocked } }),
   settings:      (payload) => request('/admin/settings', { method: 'POST', body: payload }),
+  // Two-way sheet sync, run quietly whenever an admin opens the app.
   syncSheets:    () => request('/admin/sheets/sync', { method: 'POST' }),
-  importSheets:  () => request('/admin/sheets/import', { method: 'POST' }),
 };
 
 export default api;

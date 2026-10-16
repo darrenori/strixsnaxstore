@@ -5,8 +5,8 @@ import { z } from 'zod';
 import * as orders from '../services/order.service.js';
 import { notifyAdminsOfOrder, askBuyerForProof } from '../bot/notify.js';
 import { sniffImage } from '../lib/image.js';
+import { afterResponse } from '../lib/background.js';
 import config from '../config.js';
-import log from '../lib/logger.js';
 
 const router = Router();
 
@@ -167,9 +167,7 @@ router.post('/orders/:id/proof', replayBufferedUpload, upload.single('proof'), a
     });
 
     // Ping the admins, but never make the buyer wait on Telegram's API.
-    notifyAdminsOfOrder(order, req.user).catch((err) =>
-      log.error('Admin notify failed', { error: err.message })
-    );
+    afterResponse('Admin notify', () => notifyAdminsOfOrder(order, req.user));
 
     return res.json({ order });
   } catch (err) { return next(err); }

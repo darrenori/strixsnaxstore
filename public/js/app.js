@@ -210,7 +210,10 @@ async function boot() {
     else if (startParam === 'admin' && me.isAdmin) navigate('admin');
     else emit();
 
-    if (me.isAdmin) refreshAdminBadge();
+    if (me.isAdmin) {
+      refreshAdminBadge();
+      syncSheets();
+    }
   } catch (err) {
     // A signature problem stops the shopper ordering at all, so it has to be
     // said plainly. A network blip with a cached menu does not: leave the
@@ -229,6 +232,50 @@ async function refreshAdminBadge() {
     state.adminSummaryAt = Date.now();
     setAdminBadge(summary.stats.pendingReview);
   } catch { /* the admin tab will surface any real problem */ }
+}
+
+/**
+ * Pull edits typed into the spreadsheet in, and push the shop's state out.
+ *
+ * Runs on its own whenever an admin opens or returns to the app, in place of
+ * the PUSH and SYNC buttons that used to sit in Settings. Nothing waits on it:
+ * the screen is already up, and only a change worth knowing about is shown.
+ * The server rate-limits it too, so a phone flicking between apps costs one.
+ */
+const SHEET_SYNC_MS = 10_000;
+let lastSheetSync = 0;
+let sheetSyncing = false;
+
+async function syncSheets() {
+  if (sheetSyncing || Date.now() - lastSheetSync < SHEET_SYNC_MS) return;
+  if (state.adminSummary && !state.adminSummary.integrations?.sheets) return;
+  sheetSyncing = true;
+  lastSheetSync = Date.now();
+  try {
+    const r = await api.syncSheets();
+    if (r?.skipped && typeof r.skipped === 'string') return;
+
+    const parts = [];
+    if (r.updated) parts.push(`${r.updated} item(s) updated`);
+    if (r.stockChanged) parts.push(`${r.stockChanged} stock change(s)`);
+    if (parts.length) {
+      toast(`Sheet edits applied: ${parts.join(' · ')}`, 'ok');
+      // The menu on screen predates those edits.
+      await refreshCatalog();
+      invalidateAdminSummary();
+      if (state.route.name === 'shop') emit();
+    }
+    // Say so, because the sheet will look untouched and that is easy to
+    // misread as the sync not working. Rows for SKUs the shop does not know
+    // are left alone silently: they are usually notes somebody added.
+    const unreadable = (r.skipped ?? []).filter((x) => x.reason !== 'no item with that SKU');
+    if (unreadable.length) {
+      toast(`Sheet row(s) ${unreadable.map((x) => x.row).join(', ')} could not be read: `
+        + `${unreadable[0].reason}`, 'error');
+    }
+  } catch { /* best-effort; the next open tries again */ } finally {
+    sheetSyncing = false;
+  }
 }
 
 /**
@@ -294,6 +341,9 @@ let lastForegroundFetch = 0;
 
 document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState !== 'visible' || !state.catalog) return;
+  // Before the catalogue throttle: an admin who has just edited the sheet and
+  // switched back should see it applied, not wait out the 30 seconds.
+  if (state.me?.isAdmin) syncSheets();
   if (Date.now() - lastForegroundFetch < FOREGROUND_REFRESH_MS) return;
   lastForegroundFetch = Date.now();
   if (!(await refreshCatalog())) return;      // offline; keep what we have
