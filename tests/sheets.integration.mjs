@@ -574,6 +574,66 @@ console.log('\n- opening the app syncs both ways, with no button -');
     again.body?.skipped === 'recent', JSON.stringify(again.body));
 }
 
+console.log('\n- a sale the sheet has not caught up with is not undone by a sync -');
+{
+  await settle();
+  const { query: sql, one: first } = await import('../src/lib/db.js');
+  const before = await first("select stock from items where sku = 'HP-MILK'");
+  // The sale's write to Items & Stock failed and is waiting for its retry, so
+  // the sheet still shows the count from before the packets were taken.
+  const tab = tabs.get('Items & Stock');
+  const index = tab.rows.findIndex((r) => r?.[0] === 'HP-MILK');
+  tab.rows[index][8] = String(before.stock + 2);
+  await sql(
+    `insert into background_jobs(kind, entity_key, run_after)
+     values ('catalog_sheet_sync', 'HP-MILK', now() + interval '1 hour')
+     on conflict (kind, entity_key) do update set run_after = excluded.run_after`
+  );
+
+  const res = await call('/api/admin/sheets/import', { as: ADMIN, method: 'POST' });
+  check('the sync runs', res.status === 200, JSON.stringify(res.body).slice(0, 160));
+  const after = await first("select stock from items where sku = 'HP-MILK'");
+  check('the stale sheet count does not put the sold packets back',
+    after.stock === before.stock, `${before.stock} -> ${after.stock}`);
+  await settle();
+  check('and the sheet is corrected to the real count',
+    tab.rows.find((r) => r?.[0] === 'HP-MILK')?.[8] === String(before.stock),
+    tab.rows.find((r) => r?.[0] === 'HP-MILK')?.[8]);
+  await sql("delete from background_jobs where kind = 'catalog_sheet_sync' and entity_key = 'HP-MILK'");
+}
+
+console.log('\n- admins can see when the sheet is behind, and why -');
+{
+  await settle();
+  const { query: sql } = await import('../src/lib/db.js');
+  const { drainBackgroundJobs } = await import('../src/services/collation.service.js');
+
+  let summary = await call('/api/admin/summary', { as: ADMIN });
+  check('a caught-up sheet reports nothing waiting',
+    summary.body?.integrations?.sheetQueue?.pending === 0, JSON.stringify(summary.body?.integrations?.sheetQueue));
+
+  await sql(
+    `insert into background_jobs(kind, entity_key, run_after, attempts, last_error)
+     values ('catalog_sheet_sync', 'HP-CARAMEL', now() + interval '1 hour', 3, 'The caller does not have permission')`
+  );
+  summary = await call('/api/admin/summary', { as: ADMIN });
+  const queue = summary.body?.integrations?.sheetQueue;
+  check('a failing write is counted', queue?.failing === 1, JSON.stringify(queue));
+  check('with Google\'s reason', /permission/.test(queue?.lastError ?? ''), queue?.lastError);
+  await sql("delete from background_jobs where entity_key = 'HP-CARAMEL'");
+
+  // Out of time once the batch is claimed (the claim itself outlasts a 1ms
+  // budget): the job must be handed back, not left claimed for ten minutes.
+  await sql(
+    `insert into background_jobs(kind, entity_key) values ('catalog_sheet_sync', 'HP-CARAMEL')`
+  );
+  const done = await drainBackgroundJobs({ budgetMs: 1 });
+  const [left] = await sql("select claimed_at, attempts from background_jobs where entity_key = 'HP-CARAMEL'");
+  check('a drain out of time does no work', done === 0, String(done));
+  check('and leaves the job unclaimed for the next run', left && left.claimed_at === null, JSON.stringify(left));
+  await drainBackgroundJobs();
+}
+
 console.log('\n- a buyer whose name is a formula -');
 {
   const cat = await call('/api/catalog');

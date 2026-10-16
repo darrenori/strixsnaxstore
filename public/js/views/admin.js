@@ -612,6 +612,24 @@ function storageSize(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/**
+ * Whether the sheet has caught up with the shop. Writes happen after the
+ * shop answers, so when Google keeps refusing them this is the only place
+ * that says so, along with Google's own reason.
+ */
+function sheetQueueNote(queue) {
+  if (!queue) return null;
+  if (queue.pending === 0) return el('p', { class: 'field__hint' }, '✅ Sheet is up to date.');
+  if (queue.failing === 0) {
+    return el('p', { class: 'field__hint' }, `⏳ ${queue.pending} update(s) on the way to the sheet.`);
+  }
+  return el('div', {},
+    el('p', { class: 'field__hint' },
+      `⚠️ ${queue.failing} sheet update(s) keep failing and are being retried`
+      + (queue.oldest ? ` (oldest ${relTime(queue.oldest)}).` : '.')),
+    queue.lastError ? el('p', { class: 'order__note' }, `Google said: ${queue.lastError}`) : null);
+}
+
 function renderSettings(root, summary) {
   const openToggle = el('input', { type: 'checkbox' });
   openToggle.checked = summary.settings.storeOpen;
@@ -655,6 +673,7 @@ function renderSettings(root, summary) {
             + 'Edit prices, names or stock in Items & Stock and they are applied '
             + 'the next time you open the app.'
           : 'Not configured - set the Google service-account variables on the server.'),
+      sheetQueueNote(summary.integrations.sheetQueue),
       summary.integrations.sheetUrl
         ? el('p', {}, el('a', { href: summary.integrations.sheetUrl, target: '_blank', rel: 'noopener' },
             'Open the spreadsheet ↗'))

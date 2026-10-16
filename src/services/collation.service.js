@@ -115,14 +115,34 @@ async function performJob(job) {
   throw new Error(`Unknown background job kind: ${job.kind}`);
 }
 
+/**
+ * How long one drain may run. Vercel kills a function at 30 seconds, and a
+ * job killed mid-run stays claimed for ten minutes, which is a sale that sits
+ * missing from the stock column for that long. Stopping early instead hands
+ * the rest back for the next run straight away.
+ */
+const DRAIN_BUDGET_MS = 20_000;
+
 /** Process due follow-up work. Safe for the boot loop, Vercel, and cron. */
-export async function drainBackgroundJobs({ limit = 50 } = {}) {
+export async function drainBackgroundJobs({ limit = 50, budgetMs = DRAIN_BUDGET_MS } = {}) {
+  const deadline = Date.now() + budgetMs;
   let processed = 0;
-  while (processed < limit) {
+  while (processed < limit && Date.now() < deadline) {
     const jobs = await claimJobs(Math.min(10, limit - processed));
     if (jobs.length === 0) break;
 
-    for (const job of jobs) {
+    for (const [index, job] of jobs.entries()) {
+      if (Date.now() >= deadline) {
+        // Out of time: unclaim what is left so the next request picks it up,
+        // and do not count this as one of their attempts.
+        await query(
+          `update background_jobs
+              set claimed_at = null, attempts = greatest(attempts - 1, 0)
+            where id = any($1::bigint[])`,
+          [jobs.slice(index).map((j) => j.id)]
+        );
+        break;
+      }
       try {
         await performJob(job);
         const deleted = await query(
@@ -172,6 +192,38 @@ export function kickJobRunner() {
     } while (runnerRequested);
   }).finally(() => { activeRunner = null; });
   return activeRunner;
+}
+
+/**
+ * How far behind the spreadsheet is, for the admin Settings screen.
+ *
+ * The sheet is written after the shop has answered, so a write Google keeps
+ * refusing is otherwise invisible: the order goes through, and the stock
+ * column just never moves. Showing the backlog and the last error in the app
+ * means nobody needs the server logs to find out why.
+ */
+export async function getSheetQueueStatus() {
+  if (!sheets.sheetsEnabled()) return null;
+  try {
+    const row = await one(`
+      select count(*)::int as pending,
+             count(*) filter (where last_error is not null)::int as failing,
+             min(created_at) as oldest,
+             (select last_error from background_jobs
+               where last_error is not null
+               order by updated_at desc limit 1) as last_error
+        from background_jobs
+       where kind <> 'low_stock_check'
+    `);
+    return {
+      pending: row?.pending ?? 0,
+      failing: row?.failing ?? 0,
+      oldest: row?.oldest ?? null,
+      lastError: row?.last_error ?? null,
+    };
+  } catch {
+    return null;                  // queue table not there yet
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -500,5 +552,5 @@ export default {
   queue, syncOrderToSheets, queueOrderSync, syncStockLedger,
   syncOrderStockMovements, syncAllStockMovements,
   syncCatalogToSheets, syncCatalogItemsToSheets, checkLowStock,
-  queueStockFollowUp, drainBackgroundJobs, kickJobRunner,
+  queueStockFollowUp, drainBackgroundJobs, kickJobRunner, getSheetQueueStatus,
 };

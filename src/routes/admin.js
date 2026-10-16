@@ -5,6 +5,7 @@ import * as admin from '../services/admin.service.js';
 import * as catalog from '../services/catalog.service.js';
 import { notifyBuyerOfDecision } from '../bot/notify.js';
 import { sheetsEnabled } from '../lib/sheets.js';
+import { getSheetQueueStatus, kickJobRunner } from '../services/collation.service.js';
 import { afterResponse } from '../lib/background.js';
 import config from '../config.js';
 
@@ -16,11 +17,15 @@ const router = Router();
 
 router.get('/admin/summary', async (req, res, next) => {
   try {
-    const [stats, low, settings, proofStorage] = await Promise.all([
+    // A sheet write that failed only retries when something wakes the
+    // worker. An admin opening the dashboard is a good moment to.
+    kickJobRunner();
+    const [stats, low, settings, proofStorage, sheetQueue] = await Promise.all([
       orders.getStats(),
       catalog.getLowStockItems(),
       catalog.getSettings(),
       orders.getProofStorageStats(),
+      getSheetQueueStatus(),
     ]);
     res.json({
       stats,
@@ -43,6 +48,7 @@ router.get('/admin/summary', async (req, res, next) => {
           : null,
         paynowDynamic: Boolean(config.paynow.proxyValue),
         lowStockAlertAt: config.store.lowStockAlertAt,
+        sheetQueue,
       },
       proofStorage,
     });
