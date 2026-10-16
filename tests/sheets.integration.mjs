@@ -579,27 +579,36 @@ console.log('\n- a sale the sheet has not caught up with is not undone by a sync
   await settle();
   const { query: sql, one: first } = await import('../src/lib/db.js');
   const before = await first("select stock from items where sku = 'HP-MILK'");
-  // The sale's write to Items & Stock failed and is waiting for its retry, so
-  // the sheet still shows the count from before the packets were taken.
+  // The packets left the shelf, but the sync read Items & Stock before the
+  // sale's new count reached it: on another server instance, with no queued
+  // job here to say so. The sheet still holds what we last wrote.
+  await sql("update items set stock = stock - 2 where sku = 'HP-MILK'");
+  const sold = await first("select stock from items where sku = 'HP-MILK'");
   const tab = tabs.get('Items & Stock');
   const index = tab.rows.findIndex((r) => r?.[0] === 'HP-MILK');
-  tab.rows[index][8] = String(before.stock + 2);
-  await sql(
-    `insert into background_jobs(kind, entity_key, run_after)
-     values ('catalog_sheet_sync', 'HP-MILK', now() + interval '1 hour')
-     on conflict (kind, entity_key) do update set run_after = excluded.run_after`
-  );
+  check('the sheet still shows the count from before the sale',
+    tab.rows[index][8] === String(before.stock), tab.rows[index][8]);
 
   const res = await call('/api/admin/sheets/import', { as: ADMIN, method: 'POST' });
   check('the sync runs', res.status === 200, JSON.stringify(res.body).slice(0, 160));
   const after = await first("select stock from items where sku = 'HP-MILK'");
   check('the stale sheet count does not put the sold packets back',
-    after.stock === before.stock, `${before.stock} -> ${after.stock}`);
+    after.stock === sold.stock, `${sold.stock} -> ${after.stock}`);
+  check('and nothing is reported as a stock change', res.body?.stockChanged === 0,
+    String(res.body?.stockChanged));
   await settle();
   check('and the sheet is corrected to the real count',
-    tab.rows.find((r) => r?.[0] === 'HP-MILK')?.[8] === String(before.stock),
+    tab.rows.find((r) => r?.[0] === 'HP-MILK')?.[8] === String(sold.stock),
     tab.rows.find((r) => r?.[0] === 'HP-MILK')?.[8]);
-  await sql("delete from background_jobs where kind = 'catalog_sheet_sync' and entity_key = 'HP-MILK'");
+
+  // A person's count still wins, even on a row that was behind.
+  await sql("update items set stock = stock - 1 where sku = 'HP-MILK'");
+  tab.rows[tab.rows.findIndex((r) => r?.[0] === 'HP-MILK')][8] = '40';
+  const counted = await call('/api/admin/sheets/import', { as: ADMIN, method: 'POST' });
+  const recounted = await first("select stock from items where sku = 'HP-MILK'");
+  check('a count typed into the sheet is applied', recounted.stock === 40,
+    `${recounted.stock} (${JSON.stringify(counted.body?.stockChanges)})`);
+  await settle();
 }
 
 console.log('\n- admins can see when the sheet is behind, and why -');
@@ -622,12 +631,14 @@ console.log('\n- admins can see when the sheet is behind, and why -');
   check('with Google\'s reason', /permission/.test(queue?.lastError ?? ''), queue?.lastError);
   await sql("delete from background_jobs where entity_key = 'HP-CARAMEL'");
 
-  // Out of time once the batch is claimed (the claim itself outlasts a 1ms
-  // budget): the job must be handed back, not left claimed for ten minutes.
+  // Out of time once the batch is claimed: the job must be handed back, not
+  // left claimed for ten minutes. The clock jumps a minute per reading, so
+  // the deadline passes between the claim and the first job.
   await sql(
     `insert into background_jobs(kind, entity_key) values ('catalog_sheet_sync', 'HP-CARAMEL')`
   );
-  const done = await drainBackgroundJobs({ budgetMs: 1 });
+  let tick = 0;
+  const done = await drainBackgroundJobs({ budgetMs: 90_000, now: () => (tick++) * 60_000 });
   const [left] = await sql("select claimed_at, attempts from background_jobs where entity_key = 'HP-CARAMEL'");
   check('a drain out of time does no work', done === 0, String(done));
   check('and leaves the job unclaimed for the next run', left && left.claimed_at === null, JSON.stringify(left));

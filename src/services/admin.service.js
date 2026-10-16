@@ -3,7 +3,7 @@ import * as sheets from '../lib/sheets.js';
 import { afterResponse } from '../lib/background.js';
 import {
   syncAllStockMovements, syncCatalogToSheets, syncCatalogItemsToSheets, queueStockFollowUp,
-  kickJobRunner,
+  kickJobRunner, getSheetCatalogSnapshot,
 } from './collation.service.js';
 import { getCatalogForSheets } from './catalog.service.js';
 import log from '../lib/logger.js';
@@ -321,9 +321,9 @@ export async function importCatalogFromSheets({ admin }) {
   }
   if (!rows) throw new AdminError('Google Sheets is not configured.', 'SHEETS_DISABLED', 400);
 
-  const [current, stale] = await Promise.all([
+  const [current, written] = await Promise.all([
     getCatalogForSheets(),
-    pendingCatalogSyncs(),
+    getSheetCatalogSnapshot(),
   ]);
   const bySku = new Map(current.map((i) => [i.sku, i]));
 
@@ -343,26 +343,34 @@ export async function importCatalogFromSheets({ admin }) {
       skipped.push({ sku: row.sku, row: row.row, reason: 'no item with that SKU' });
       continue;
     }
-    // The shop changed this line after the sheet was last written, so the
-    // row is older than the database. It is restated below, not imported.
-    if (stale.has(row.sku)) {
+    // We have no record of writing this row, so nothing in it can be told
+    // apart from an out-of-date copy. Restate it rather than guess.
+    const last = written[row.sku];
+    if (!last) {
       unchanged += 1;
       continue;
     }
 
     // --- everything except stock ------------------------------------------
+    // A cell counts only if a person changed it: it no longer says what we
+    // last wrote there. A cell that still matches our last write but not the
+    // database is just behind, and the restate below brings it up to date.
     const blank = (v) => (v === '' || v === undefined ? null : v);
     const same = (a, b) => blank(a) === blank(b);
+    const edited = (sheetValue, lastValue, dbValue) =>
+      !same(sheetValue, lastValue) && !same(sheetValue, dbValue);
     const patch = {};
-    if (!same(row.name, item.name)) patch.name = row.name;
-    if (!same(row.variant, item.variant)) patch.variant = row.variant;
-    if (!same(row.description, item.description)) patch.description = row.description;
-    if (row.priceCents !== item.price_cents) patch.price_cents = row.priceCents;
-    if (row.lowStockAt !== null && row.lowStockAt !== item.low_stock_at) {
+    if (edited(row.name, last.name, item.name)) patch.name = row.name;
+    if (edited(row.variant, last.variant, item.variant)) patch.variant = row.variant;
+    if (edited(row.description, last.description, item.description)) {
+      patch.description = row.description;
+    }
+    if (edited(row.priceCents, last.priceCents, item.price_cents)) patch.price_cents = row.priceCents;
+    if (row.lowStockAt !== null && edited(row.lowStockAt, last.lowStockAt, item.low_stock_at)) {
       patch.low_stock_at = row.lowStockAt;
     }
-    if (row.isActive !== item.is_active) patch.is_active = row.isActive;
-    if (row.isSpecial !== item.is_special) patch.is_special = row.isSpecial;
+    if (edited(row.isActive, last.isActive, item.is_active)) patch.is_active = row.isActive;
+    if (edited(row.isSpecial, last.isSpecial, item.is_special)) patch.is_special = row.isSpecial;
 
     const fields = Object.keys(patch);
     if (fields.length) {
@@ -382,7 +390,8 @@ export async function importCatalogFromSheets({ admin }) {
     }
 
     // --- stock, through the ledger ----------------------------------------
-    if (row.stock !== null && row.stock !== item.stock) {
+    const stockEdited = row.stock !== null && edited(row.stock, last.stock, item.stock);
+    if (stockEdited) {
       try {
         await setStock({
           itemId: item.id,
@@ -397,7 +406,7 @@ export async function importCatalogFromSheets({ admin }) {
       }
     }
 
-    if (!fields.length && (row.stock === null || row.stock === item.stock)) unchanged += 1;
+    if (!fields.length && !stockEdited) unchanged += 1;
   }
 
   // Restate every item, including malformed rows we refused to import and
@@ -428,18 +437,6 @@ export async function importCatalogFromSheets({ admin }) {
 // Re-exported so the routes keep one import for "the admin can do this".
 // The implementation lives with the rest of the collation, next to the order
 // sync and the low-stock alert it has to stay consistent with.
-/** SKUs with a catalogue write to the sheet still queued or running. */
-async function pendingCatalogSyncs() {
-  try {
-    const rows = await query(
-      "select entity_key from background_jobs where kind = 'catalog_sheet_sync'"
-    );
-    return new Set(rows.map((r) => r.entity_key));
-  } catch {
-    return new Set();             // queue table not there yet
-  }
-}
-
 /** Shortest gap between two automatic syncs, across every server instance. */
 const AUTO_SYNC_GAP_SECONDS = 10;
 

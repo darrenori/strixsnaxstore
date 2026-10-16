@@ -124,15 +124,17 @@ async function performJob(job) {
 const DRAIN_BUDGET_MS = 20_000;
 
 /** Process due follow-up work. Safe for the boot loop, Vercel, and cron. */
-export async function drainBackgroundJobs({ limit = 50, budgetMs = DRAIN_BUDGET_MS } = {}) {
-  const deadline = Date.now() + budgetMs;
+export async function drainBackgroundJobs({
+  limit = 50, budgetMs = DRAIN_BUDGET_MS, now = Date.now,
+} = {}) {
+  const deadline = now() + budgetMs;
   let processed = 0;
-  while (processed < limit && Date.now() < deadline) {
+  while (processed < limit && now() < deadline) {
     const jobs = await claimJobs(Math.min(10, limit - processed));
     if (jobs.length === 0) break;
 
     for (const [index, job] of jobs.entries()) {
-      if (Date.now() >= deadline) {
+      if (now() >= deadline) {
         // Out of time: unclaim what is left so the next request picks it up,
         // and do not count this as one of their attempts.
         await query(
@@ -435,11 +437,70 @@ export async function syncAllStockMovements() {
   return writeStockMovementRows(rows);
 }
 
+// ---------------------------------------------------------------------------
+// What the sheet was last told
+// ---------------------------------------------------------------------------
+
+/**
+ * The editable cells of Items & Stock as this app last wrote them, by SKU.
+ *
+ * Reading the sheet back cannot tell a person's edit from a row the app has
+ * not refreshed yet: both simply differ from the database. Treating every
+ * difference as an edit is how sales were being undone. A buyer's packets
+ * came off the shelf, a sync read the row before its new count landed, and
+ * set the old count back as if somebody had typed it. Remembering what was
+ * written makes the question answerable: a cell is an edit only if it no
+ * longer says what we put there.
+ *
+ * Kept in the settings table so it needs no migration.
+ */
+const SHEET_SNAPSHOT_KEY = 'sheet_catalog_snapshot';
+
+export function sheetSnapshotOf(item) {
+  return {
+    name: item.name ?? '',
+    variant: item.variant ?? '',
+    description: item.description ?? '',
+    priceCents: item.price_cents,
+    stock: item.stock ?? 0,
+    lowStockAt: item.low_stock_at ?? 0,
+    isActive: Boolean(item.is_active),
+    isSpecial: Boolean(item.is_special),
+  };
+}
+
+async function rememberSheetCatalog(items, { replace = false } = {}) {
+  const snapshot = Object.fromEntries(items.map((i) => [i.sku, sheetSnapshotOf(i)]));
+  try {
+    // `||` merges by SKU in one statement, so two instances recording
+    // different rows at once cannot drop each other's.
+    await query(
+      `insert into settings(key, value, updated_at) values ($1, $2::jsonb, now())
+       on conflict (key) do update
+         set value = ${replace ? 'excluded.value' : 'settings.value || excluded.value'},
+             updated_at = now()`,
+      [SHEET_SNAPSHOT_KEY, JSON.stringify(snapshot)]
+    );
+  } catch (err) {
+    // The rows are in the sheet; without the record the next sync just
+    // declines to import them, which is the safe direction.
+    log.error('Could not record the sheet snapshot', { error: err.message });
+  }
+}
+
+export async function getSheetCatalogSnapshot() {
+  const row = await one('select value from settings where key = $1', [SHEET_SNAPSHOT_KEY]);
+  return row?.value ?? {};
+}
+
 /** Push the whole catalogue into the "Items & Stock" tab. */
 export async function syncCatalogToSheets() {
   if (!sheets.sheetsEnabled()) return false;
   try {
-    return await sheets.syncCatalog(await getCatalogForSheets());
+    const rows = await getCatalogForSheets();
+    const ok = await sheets.syncCatalog(rows);
+    if (ok) await rememberSheetCatalog(rows, { replace: true });
+    return ok;
   } catch (err) {
     log.error('Catalog sheet sync failed', { error: err.message });
     return false;
@@ -452,7 +513,10 @@ export async function syncCatalogItemsToSheets(skus) {
   try {
     const wanted = [...new Set((skus ?? []).filter(Boolean))];
     if (wanted.length === 0) return true;
-    return await sheets.syncCatalogItems(await getCatalogForSheets({ skus: wanted }));
+    const rows = await getCatalogForSheets({ skus: wanted });
+    const ok = await sheets.syncCatalogItems(rows);
+    if (ok) await rememberSheetCatalog(rows);
+    return ok;
   } catch (err) {
     log.error('Catalogue row sync failed', { error: err.message });
     return false;
@@ -553,4 +617,5 @@ export default {
   syncOrderStockMovements, syncAllStockMovements,
   syncCatalogToSheets, syncCatalogItemsToSheets, checkLowStock,
   queueStockFollowUp, drainBackgroundJobs, kickJobRunner, getSheetQueueStatus,
+  getSheetCatalogSnapshot, sheetSnapshotOf,
 };
