@@ -6,6 +6,7 @@ import {
 } from './store.js';
 import { toast, el, setAdminBadge } from './ui.js';
 import { applyCartChange, resetPatchers } from './patch.js';
+import enablePullToRefresh from './pull.js';
 import renderShop from './views/shop.js';
 import renderCart from './views/cart.js';
 import renderPayment, { stopCountdown } from './views/payment.js';
@@ -353,5 +354,34 @@ document.addEventListener('visibilitychange', async () => {
   if (state.route.name === 'shop') emit();
   if (state.me?.isAdmin) refreshAdminBadge();
 });
+
+/**
+ * Pulled down from the top: reload whatever is on screen.
+ *
+ * Every screen fetches its own data when it is drawn (orders, an order's
+ * payment status, the admin queue), so redrawing the current route after the
+ * menu is re-fetched refreshes all of it. The payment screen can be holding a
+ * copy of the order handed over at checkout, which would redraw stale, so it
+ * is dropped in favour of a fresh fetch.
+ */
+async function pullRefresh() {
+  if (bootFailed || !state.catalog) return;
+  if (state.route.name === 'payment' && state.route.params?.prefetched) {
+    state.route.params = { orderId: state.route.params.orderId };
+  }
+  invalidateAdminSummary();
+  lastForegroundFetch = Date.now();
+  const ok = await refreshCatalog();
+  if (!ok) toast('Could not refresh. Check your connection.', 'error');
+  reconcileCart();
+  emit();
+  tg.haptic(ok ? 'success' : 'error');
+  if (state.me?.isAdmin) {
+    refreshAdminBadge();
+    syncSheets();
+  }
+}
+
+enablePullToRefresh(pullRefresh, { haptic: tg.haptic });
 
 boot();

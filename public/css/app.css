@@ -1114,6 +1114,33 @@ img { max-width: 100%; display: block; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* Pull to refresh: a pill that slides down over the header as you pull. */
+.ptr {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 8px);
+  left: 50%;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: var(--r-pill);
+  background: var(--navy);
+  color: var(--cream);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  box-shadow: var(--shadow-pop);
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, -56px);
+}
+.ptr.is-animating { transition: transform .22s ease, opacity .22s ease; }
+.ptr__icon { display: inline-block; transition: transform .18s ease; }
+.ptr.is-armed .ptr__icon { transform: rotate(180deg); }
+.ptr.is-armed { background: var(--red); }
+.ptr.is-refreshing .ptr__icon { animation: spin .7s linear infinite; }
+
 .toast {
   position: fixed;
   left: 50%;
