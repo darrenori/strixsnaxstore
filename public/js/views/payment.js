@@ -1,6 +1,6 @@
 import { el, money, toast, statusPill, itemLabel, relTime } from '../ui.js';
 import { navigate } from '../store.js';
-import { haptic, confirm } from '../tg.js';
+import { haptic, confirm, close } from '../tg.js';
 import api from '../api.js';
 
 /**
@@ -125,6 +125,10 @@ function handover(order, onSent) {
       haptic('success');
       toast('Check your chat with the bot 💬', 'ok');
       onSent(updated);
+      // The bot's message is waiting in the chat, which is where the
+      // screenshot has to go, so take the buyer straight there. The short
+      // pause lets the haptic and the toast register first.
+      setTimeout(close, 600);
     } catch (err) {
       haptic('error');
       toast(err.message, 'error');

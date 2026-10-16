@@ -111,4 +111,16 @@ export function hideBackButton() {
   tg.BackButton.hide();
 }
 
-export default { tg, inTelegram, ready, initData, user, applyTheme, haptic, alert, confirm };
+/**
+ * Close the Mini App and drop the buyer back into the chat.
+ *
+ * Returns false outside Telegram, where there is no chat to return to and the
+ * caller should leave the page as it is.
+ */
+export function close() {
+  if (!inTelegram || !tg?.close) return false;
+  tg.close();
+  return true;
+}
+
+export default { tg, inTelegram, ready, initData, user, applyTheme, haptic, alert, confirm, close };
