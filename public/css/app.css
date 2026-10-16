@@ -423,17 +423,20 @@ img { max-width: 100%; display: block; }
 /* --------------------------------------------------------------------------
    Item row
    -------------------------------------------------------------------------- */
-/* Name and price on the first line, anything else beneath, and the button in
-   a column of its own down the right. Giving the button its own row made
+/* Name on the first line, anything else beneath, and the price and button in
+   columns of their own down the right. Giving the button its own row made
    every item three lines tall whether it had anything to say or not, which
-   turned a menu of two dozen things into a very long scroll. */
+   turned a menu of two dozen things into a very long scroll. The price spans
+   every line and centres on it, exactly as the button does, so it always sits
+   level with ADD: pinned to the first line, it floated above the button on
+   any row with a description or a tag under the name. */
 .item {
   display: grid;
   grid-template-columns: 1fr auto auto;
   grid-template-areas:
     'name  price action'
-    'desc  desc  action'
-    'meta  meta  action';
+    'desc  price action'
+    'meta  price action';
   gap: 2px 12px;
   padding: 12px 0;
   border-bottom: 1px solid var(--border);
@@ -441,8 +444,12 @@ img { max-width: 100%; display: block; }
 }
 .item:last-child { border-bottom: none; }
 .item.is-out { opacity: .48; }
-/* Nothing under the name, so the row is one line and the button centres on it. */
+/* Nothing under the name, so the row is one line and the name, price and
+   button all centre on it. The empty description and stock lines are dropped
+   rather than left as blank tracks, which would pull the price and button a
+   few pixels below the name. */
 .item--tight { align-items: center; }
+.item.item--tight { grid-template-areas: 'name price action'; }
 
 .item__name {
   grid-area: name;
@@ -462,6 +469,7 @@ img { max-width: 100%; display: block; }
 .item__variant { font-weight: 600; opacity: .8; text-transform: none; }
 .item__price {
   grid-area: price;
+  align-self: center;
   font-family: var(--font-menu);
   font-weight: 800;
   font-size: 15.5px;
@@ -574,10 +582,7 @@ img { max-width: 100%; display: block; }
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
-  /* The right padding is the menu rows' button column, so a group's price
-     lands in the same column as every other price on the page rather than
-     sticking out past them on its own. */
-  padding: 13px calc(var(--action-w) + 16px) 3px 0;
+  padding: 13px 0 3px 0;
   border-top: 1px solid var(--border);
 }
 .section__body > .group__head:first-child { border-top: none; }
@@ -592,38 +597,26 @@ img { max-width: 100%; display: block; }
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.group__price {
-  font-family: var(--font-menu);
-  font-weight: 800;
-  font-size: 15.5px;
-  color: var(--red);
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-  min-width: 4.4ch;
-}
 .group__desc {
   font-size: 12.5px;
   color: var(--ink-soft);
   margin: 2px 0 6px;
   max-width: 46ch;
 }
-.section--panel .group__name,
-.section--panel .group__price { color: #fff; }
+.section--panel .group__name { color: #fff; }
 .section--panel .group__desc { color: rgba(255, 255, 255, .86); }
 .section--panel .group__head { border-top-color: rgba(255, 255, 255, .28); }
 
 /* Flavour rows sitting under a group header get the poster's bullet, and stay
    on one line - a bullet list should read as a list, not as stacked cards. */
 .item--sub {
-  grid-template-columns: 1fr auto;
-  grid-template-areas: 'name action' 'meta action';
+  grid-template-columns: 1fr auto auto;
+  grid-template-areas: 'name price action' 'meta price action';
   align-items: center;
   padding: 6px 0 6px 16px;
   border-bottom: none;
   position: relative;
 }
-.item--sub .item__price,
 .item--sub .item__desc { display: none; }
 .item--sub .item__action { grid-area: action; }
 .item--sub .item__name {

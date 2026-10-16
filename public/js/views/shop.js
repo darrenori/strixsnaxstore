@@ -68,10 +68,11 @@ function stockMeta(item) {
  *
  * `label` is passed in because how an item names itself depends on where it
  * sits: the poster writes "MILK" under a Hello Panda heading, not
- * "HELLO PANDA - MILK". Prices are dropped on rows that sit under a group
- * header carrying the shared price, again mirroring the poster.
+ * "HELLO PANDA - MILK". Every row carries its own price beside its ADD
+ * button, flavours under a group heading included, so a price is always
+ * next to the thing that buys it.
  */
-function itemRow(item, { label, showPrice = true, showDesc = true, sub = false } = {}) {
+function itemRow(item, { label, showDesc = true, sub = false } = {}) {
   const name = el('h3', { class: 'item__name' }, label ?? item.name);
   if (item.isTopPick) name.append(el('span', { class: 'tag tag--top' }, 'Top pick'));
   if (item.isSpecial && !sub) name.append(el('span', { class: 'tag tag--special' }, 'Special'));
@@ -90,7 +91,7 @@ function itemRow(item, { label, showPrice = true, showDesc = true, sub = false }
 
   return el('article', { class: classes.join(' ') },
     name,
-    showPrice ? el('span', { class: 'item__price' }, `$${item.price}`) : null,
+    el('span', { class: 'item__price' }, `$${item.price}`),
     desc,
     meta,
     quantityControl(item)
@@ -149,13 +150,13 @@ function renderGroup(group, category) {
   }
 
   if (samePrice) {
-    // "NISSIN CUP NOODLES  $1.90" then the flavours beneath it.
+    // "NISSIN CUP NOODLES" then the flavours beneath it, each priced beside
+    // its own ADD button.
     const head = el('div', { class: 'group__head' },
-      el('h3', { class: 'group__name' }, group.name),
-      el('span', { class: 'group__price' }, `$${items[0].price}`)
+      el('h3', { class: 'group__name' }, group.name)
     );
     const rows = items.map((item) =>
-      itemRow(item, { label: item.variant ?? item.name, showPrice: false, showDesc: !shared, sub: true }));
+      itemRow(item, { label: item.variant ?? item.name, showDesc: !shared, sub: true }));
     return [head, groupDesc ? el('p', { class: 'group__desc' }, groupDesc) : null, ...rows]
       .filter(Boolean);
   }
